@@ -1,7 +1,7 @@
 import clsx from 'clsx';
-import { ArrowDownLeft, ArrowUpRight, Download, Filter, ReceiptText, Scale, Search, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Download, FileUp, Filter, ReceiptText, Scale, Search, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { TransactionRow } from '../components/Rows';
 import { EmptyState, PageHeader, Segmented, StatCard } from '../components/ui/common';
 import { CATEGORIES, PAYMENT_METHODS } from '../lib/categories';
@@ -95,9 +95,12 @@ export default function Transactions() {
     <div>
       <PageHeader
         title="Transactions"
-        subtitle={`${filtered.length} of ${txs.length} entries`}
+        subtitle={`Personal income & expenses · ${filtered.length} of ${txs.length} entries`}
         actions={
           <>
+            <Link to="/import" className="btn-secondary">
+              <FileUp size={16} /> <span className="hidden sm:inline">Import</span>
+            </Link>
             <button className="btn-secondary" onClick={() => downloadCSV('transactions.csv', transactionsRows(filtered))}>
               <Download size={16} /> <span className="hidden sm:inline">Export CSV</span>
             </button>

@@ -1,0 +1,73 @@
+rules_version = '2';
+
+// Paisa Ledger — every user can only ever read or write their own data under /users/{uid}.
+// Paste this into Firebase console → Firestore Database → Rules, or deploy with `firebase deploy --only firestore:rules`.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    function isDate(v) {
+      return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+    function isMoney(v) {
+      return (v is int || v is float) && v >= 0 && v <= 100000000000;
+    }
+    function isText(v, max) {
+      return v is string && v.size() <= max;
+    }
+
+    function validTransaction(id) {
+      let d = request.resource.data;
+      return d.id == id
+        && d.type in ['income', 'expense']
+        && isMoney(d.amount) && d.amount > 0
+        && isDate(d.date)
+        && isText(d.category, 40)
+        && isText(d.description, 200)
+        && isText(d.paymentMethod, 30)
+        && isText(d.notes, 1000);
+    }
+
+    function validLoan(id) {
+      let d = request.resource.data;
+      return d.id == id
+        && isText(d.borrowerName, 80) && d.borrowerName.size() > 0
+        && isText(d.phone, 20)
+        && isMoney(d.principal) && d.principal > 0
+        && isDate(d.startDate) && isDate(d.dueDate) && d.dueDate > d.startDate
+        && (d.interestRate is int || d.interestRate is float) && d.interestRate >= 0
+        && d.interestType in ['monthly', 'yearly', 'fixed']
+        && d.interestMethod in ['simple', 'compound']
+        && d.repayments is list && d.repayments.size() <= 2000
+        && isText(d.notes, 1000);
+    }
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && request.resource.data.keys().hasOnly(['settings', 'updatedAt']);
+
+      match /transactions/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validTransaction(id);
+      }
+
+      match /loans/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && validLoan(id);
+      }
+
+      // Append-only audit trail: entries can be added but never edited or removed from the app.
+      match /activity/{id} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && request.resource.data.id == id && isText(request.resource.data.label, 300);
+      }
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

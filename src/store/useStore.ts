@@ -1,13 +1,14 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
 import type { ActivityEntry, Loan, Repayment, Settings, Transaction } from '../types';
 import { buildSampleData } from '../data/sample';
 import { round2 } from '../lib/finance';
 import { formatINR, uid } from '../lib/format';
+import { suggestRepaymentSplit } from '../lib/loans';
 import { todayISO } from '../lib/dates';
+import { defaultSettings, type Backend, type CommitResult, type DataSnapshot, type Op } from './backend';
 
-export const STORAGE_KEY = 'paisa-ledger:v1';
 export const AUTO_BACKUP_KEY = 'paisa-ledger:auto-backup';
+export const THEME_KEY = 'paisa-ledger:theme';
 
 export type TxInput = Omit<Transaction, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
 export type LoanInput = Omit<Loan, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'repayments' | 'closedAt'>;
@@ -15,209 +16,296 @@ export type RepaymentInput = Omit<Repayment, 'id' | 'createdAt'>;
 
 export interface BackupFile {
   app: 'paisa-ledger';
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
   transactions: Transaction[];
   loans: Loan[];
   settings: Settings;
 }
 
-interface State {
-  transactions: Transaction[];
-  loans: Loan[];
-  settings: Settings;
-  activity: ActivityEntry[];
+export class ValidationError extends Error {}
 
-  addTransaction: (input: TxInput) => Transaction;
-  updateTransaction: (id: string, input: Partial<TxInput>) => void;
-  deleteTransaction: (id: string) => void;
-  restoreTransaction: (id: string) => void;
-  purgeTransaction: (id: string) => void;
+type Result = Promise<CommitResult>;
 
-  addLoan: (input: LoanInput) => Loan;
-  updateLoan: (id: string, input: Partial<LoanInput>) => void;
-  deleteLoan: (id: string) => void;
-  restoreLoan: (id: string) => void;
-  purgeLoan: (id: string) => void;
-  closeLoan: (id: string, date: string, settlement?: RepaymentInput) => void;
-  reopenLoan: (id: string) => void;
+interface State extends DataSnapshot {
+  /** loading until the active backend delivered its first data */
+  status: 'idle' | 'loading' | 'ready';
+  mode: 'local' | 'cloud' | null;
+  pendingSync: boolean;
+  syncError: string | null;
 
-  addRepayment: (loanId: string, input: RepaymentInput) => void;
-  updateRepayment: (loanId: string, repaymentId: string, input: RepaymentInput) => void;
-  deleteRepayment: (loanId: string, repaymentId: string) => void;
+  addTransaction: (input: TxInput) => Promise<{ id: string; result: CommitResult }>;
+  updateTransaction: (id: string, input: TxInput) => Result;
+  deleteTransaction: (id: string) => Result;
+  restoreTransaction: (id: string) => Result;
+  purgeTransaction: (id: string) => Result;
 
-  updateSettings: (s: Partial<Settings>) => void;
-  importBackup: (b: BackupFile) => void;
-  loadSampleData: () => void;
-  clearAllData: () => void;
-  emptyTrash: () => void;
+  addLoan: (input: LoanInput) => Promise<{ id: string; result: CommitResult }>;
+  updateLoan: (id: string, input: Partial<LoanInput>) => Result;
+  deleteLoan: (id: string) => Result;
+  restoreLoan: (id: string) => Result;
+  purgeLoan: (id: string) => Result;
+  closeLoan: (id: string, date: string, settlement?: RepaymentInput) => Result;
+  reopenLoan: (id: string) => Result;
+
+  addRepayment: (loanId: string, input: RepaymentInput) => Result;
+  updateRepayment: (loanId: string, repaymentId: string, input: RepaymentInput) => Result;
+  deleteRepayment: (loanId: string, repaymentId: string) => Result;
+
+  updateSettings: (s: Partial<Settings>) => Result;
+  importRecords: (txs: Transaction[], loans: Loan[], label: string) => Result;
+  replaceAll: (data: { transactions: Transaction[]; loans: Loan[]; settings?: Settings }, label: string) => Result;
+  loadSampleData: () => Result;
+  clearAllData: () => Result;
+  emptyTrash: () => Result;
 }
 
-const defaultSettings: Settings = {
-  theme: 'system',
-  userName: '',
-  reminderDays: 7,
-  browserNotifications: false,
-  lastPaymentMethod: 'UPI',
-};
+let backend: Backend | null = null;
+
+export function setBackend(b: Backend | null) {
+  backend?.stop();
+  backend = b;
+}
 
 const nowISO = () => new Date().toISOString();
+const MAX_AMOUNT = 1e11;
 
-function log(activity: ActivityEntry[], entry: Omit<ActivityEntry, 'id' | 'at'>): ActivityEntry[] {
-  return [{ ...entry, id: uid(), at: nowISO() }, ...activity].slice(0, 500);
+function activity(entry: Omit<ActivityEntry, 'id' | 'at'>): Op {
+  return { kind: 'activity', op: 'put', doc: { ...entry, id: uid(), at: nowISO() } };
 }
 
-function cleanTx(input: Partial<TxInput>): Partial<TxInput> {
-  return input.amount !== undefined ? { ...input, amount: round2(input.amount) } : input;
+function commit(ops: Op[]): Result {
+  if (!backend) return Promise.reject(new Error('Your data is still loading. Please try again in a moment.'));
+  return backend.commit(ops);
+}
+
+function assertAmount(n: number, label = 'Amount', allowZero = false) {
+  if (!Number.isFinite(n) || n < 0 || (!allowZero && n === 0)) throw new ValidationError(`${label} must be greater than ₹0`);
+  if (n > MAX_AMOUNT) throw new ValidationError(`${label} is too large`);
+}
+
+function assertDate(d: string, label = 'Date') {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(d))) throw new ValidationError(`${label} is not a valid date`);
+}
+
+function cleanTx(input: TxInput): TxInput {
+  const amount = round2(input.amount);
+  assertAmount(amount);
+  assertDate(input.date);
+  if (input.type !== 'income' && input.type !== 'expense') throw new ValidationError('Choose Cash In or Cash Out');
+  if (!input.category) throw new ValidationError('Choose a category');
+  return {
+    ...input,
+    amount,
+    description: input.description.trim().slice(0, 200),
+    notes: input.notes.trim().slice(0, 1000),
+  };
+}
+
+function validateLoan(l: Loan) {
+  if (!l.borrowerName.trim()) throw new ValidationError("Enter the borrower's name");
+  assertAmount(l.principal, 'Principal');
+  assertDate(l.startDate, 'Start date');
+  assertDate(l.dueDate, 'Due date');
+  if (l.dueDate <= l.startDate) throw new ValidationError('Due date must be after the start date');
+  if (!Number.isFinite(l.interestRate) || l.interestRate < 0) throw new ValidationError('Interest rate cannot be negative');
+  if (l.interestType !== 'fixed' && l.interestRate > 100) throw new ValidationError('Interest rate looks too high (max 100%)');
 }
 
 function cleanRepayment(input: RepaymentInput): RepaymentInput {
-  return {
+  const r = {
     ...input,
     amount: round2(input.amount),
     principalPortion: round2(input.principalPortion),
     interestPortion: round2(input.interestPortion),
+    notes: input.notes.trim().slice(0, 500),
   };
+  assertAmount(r.amount, 'Repayment amount');
+  assertDate(r.date, 'Repayment date');
+  if (r.principalPortion < 0 || r.interestPortion < 0) throw new ValidationError('Principal and interest portions cannot be negative');
+  if (Math.abs(round2(r.principalPortion + r.interestPortion) - r.amount) > 0.009) throw new ValidationError('Principal + interest must equal the repayment amount');
+  return r;
 }
 
-const sample = buildSampleData();
+/** A repayment can never exceed what is outstanding on its date. */
+function assertWithinOutstanding(loan: Loan, r: RepaymentInput, excludeId?: string) {
+  if (r.date < loan.startDate) throw new ValidationError('Repayment date cannot be before the loan start date');
+  const due = suggestRepaymentSplit(loan, r.amount, r.date, excludeId);
+  if (r.amount > due.outstanding + 0.009)
+    throw new ValidationError(`Repayment exceeds the outstanding amount of ${formatINR(due.outstanding, { paise: true })} on that date`);
+  if (r.principalPortion > due.principalDue + 0.009)
+    throw new ValidationError(`Principal portion exceeds the remaining principal of ${formatINR(due.principalDue, { paise: true })}`);
+}
 
-export const useStore = create<State>()(
-  persist(
-    (set) => ({
-      transactions: sample.transactions,
-      loans: sample.loans,
-      settings: defaultSettings,
-      activity: [],
+export const useStore = create<State>()((_set, get) => {
+  const findTx = (id: string) => {
+    const t = get().transactions.find((x) => x.id === id);
+    if (!t) throw new ValidationError('Transaction not found');
+    return t;
+  };
+  const findLoan = (id: string) => {
+    const l = get().loans.find((x) => x.id === id);
+    if (!l) throw new ValidationError('Loan not found');
+    return l;
+  };
+  const putLoan = (l: Loan): Op => ({ kind: 'loan', op: 'put', doc: { ...l, updatedAt: nowISO() } });
+  const txLabel = (t: { type: string; amount: number; category: string }) => `${t.type === 'income' ? 'Cash in' : 'Cash out'} ${formatINR(t.amount)} · ${t.category}`;
 
-      addTransaction: (input) => {
-        const t: Transaction = { ...(cleanTx(input) as TxInput), id: uid(), createdAt: nowISO(), updatedAt: nowISO() };
-        set((s) => ({
-          transactions: [t, ...s.transactions],
-          settings: { ...s.settings, lastPaymentMethod: input.paymentMethod },
-          activity: log(s.activity, { action: 'created', entity: 'transaction', label: `${t.type === 'income' ? 'Cash in' : 'Cash out'} ${formatINR(t.amount)} · ${t.category}` }),
-        }));
-        return t;
-      },
-      updateTransaction: (id, input) =>
-        set((s) => ({
-          transactions: s.transactions.map((t) => (t.id === id ? { ...t, ...cleanTx(input), updatedAt: nowISO() } : t)),
-          activity: log(s.activity, { action: 'updated', entity: 'transaction', label: `Edited ${input.category ?? 'transaction'} ${input.amount !== undefined ? formatINR(input.amount) : ''}`.trim() }),
-        })),
-      deleteTransaction: (id) =>
-        set((s) => {
-          const t = s.transactions.find((x) => x.id === id);
-          return {
-            transactions: s.transactions.map((x) => (x.id === id ? { ...x, deletedAt: nowISO() } : x)),
-            activity: t ? log(s.activity, { action: 'deleted', entity: 'transaction', label: `${t.category} ${formatINR(t.amount)} moved to trash` }) : s.activity,
-          };
-        }),
-      restoreTransaction: (id) =>
-        set((s) => ({
-          transactions: s.transactions.map((x) => (x.id === id ? { ...x, deletedAt: undefined } : x)),
-          activity: log(s.activity, { action: 'restored', entity: 'transaction', label: 'Transaction restored' }),
-        })),
-      purgeTransaction: (id) =>
-        set((s) => ({
-          transactions: s.transactions.filter((x) => x.id !== id),
-          activity: log(s.activity, { action: 'purged', entity: 'transaction', label: 'Transaction permanently deleted' }),
-        })),
+  return {
+    transactions: [],
+    loans: [],
+    activity: [],
+    settings: defaultSettings,
+    status: 'idle',
+    mode: null,
+    pendingSync: false,
+    syncError: null,
 
-      addLoan: (input) => {
-        const l: Loan = { ...input, principal: round2(input.principal), id: uid(), repayments: [], createdAt: nowISO(), updatedAt: nowISO() };
-        set((s) => ({ loans: [l, ...s.loans], activity: log(s.activity, { action: 'created', entity: 'loan', label: `Lent ${formatINR(l.principal)} to ${l.borrowerName}` }) }));
-        return l;
-      },
-      updateLoan: (id, input) =>
-        set((s) => ({
-          loans: s.loans.map((l) => (l.id === id ? { ...l, ...input, updatedAt: nowISO() } : l)),
-          activity: log(s.activity, { action: 'updated', entity: 'loan', label: `Edited loan${input.borrowerName ? ` · ${input.borrowerName}` : ''}` }),
-        })),
-      deleteLoan: (id) =>
-        set((s) => {
-          const l = s.loans.find((x) => x.id === id);
-          return {
-            loans: s.loans.map((x) => (x.id === id ? { ...x, deletedAt: nowISO() } : x)),
-            activity: l ? log(s.activity, { action: 'deleted', entity: 'loan', label: `Loan to ${l.borrowerName} moved to trash` }) : s.activity,
-          };
-        }),
-      restoreLoan: (id) =>
-        set((s) => ({ loans: s.loans.map((x) => (x.id === id ? { ...x, deletedAt: undefined } : x)), activity: log(s.activity, { action: 'restored', entity: 'loan', label: 'Loan restored' }) })),
-      purgeLoan: (id) =>
-        set((s) => ({ loans: s.loans.filter((x) => x.id !== id), activity: log(s.activity, { action: 'purged', entity: 'loan', label: 'Loan permanently deleted' }) })),
-      closeLoan: (id, date, settlement) =>
-        set((s) => ({
-          loans: s.loans.map((l) =>
-            l.id === id
-              ? {
-                  ...l,
-                  closedAt: date,
-                  updatedAt: nowISO(),
-                  repayments: settlement && settlement.amount > 0 ? [...l.repayments, { ...cleanRepayment(settlement), id: uid(), createdAt: nowISO() }] : l.repayments,
-                }
-              : l,
-          ),
-          activity: log(s.activity, { action: 'closed', entity: 'loan', label: `Loan to ${s.loans.find((l) => l.id === id)?.borrowerName ?? ''} marked as paid` }),
-        })),
-      reopenLoan: (id) =>
-        set((s) => ({ loans: s.loans.map((l) => (l.id === id ? { ...l, closedAt: undefined, updatedAt: nowISO() } : l)), activity: log(s.activity, { action: 'updated', entity: 'loan', label: 'Loan reopened' }) })),
-
-      addRepayment: (loanId, input) =>
-        set((s) => {
-          const l = s.loans.find((x) => x.id === loanId);
-          return {
-            loans: s.loans.map((x) => (x.id === loanId ? { ...x, updatedAt: nowISO(), repayments: [...x.repayments, { ...cleanRepayment(input), id: uid(), createdAt: nowISO() }] } : x)),
-            activity: log(s.activity, { action: 'repayment', entity: 'repayment', label: `Received ${formatINR(input.amount)} from ${l?.borrowerName ?? 'borrower'}` }),
-          };
-        }),
-      updateRepayment: (loanId, repaymentId, input) =>
-        set((s) => ({
-          loans: s.loans.map((x) =>
-            x.id === loanId ? { ...x, updatedAt: nowISO(), repayments: x.repayments.map((r) => (r.id === repaymentId ? { ...r, ...cleanRepayment(input) } : r)) } : x,
-          ),
-          activity: log(s.activity, { action: 'updated', entity: 'repayment', label: `Edited repayment ${formatINR(input.amount)}` }),
-        })),
-      deleteRepayment: (loanId, repaymentId) =>
-        set((s) => {
-          const r = s.loans.find((x) => x.id === loanId)?.repayments.find((y) => y.id === repaymentId);
-          return {
-            loans: s.loans.map((x) => (x.id === loanId ? { ...x, updatedAt: nowISO(), repayments: x.repayments.filter((y) => y.id !== repaymentId) } : x)),
-            activity: log(s.activity, { action: 'deleted', entity: 'repayment', label: `Deleted repayment ${r ? formatINR(r.amount) : ''} dated ${r?.date ?? ''}` }),
-          };
-        }),
-
-      updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
-      importBackup: (b) =>
-        set((s) => ({
-          transactions: b.transactions,
-          loans: b.loans,
-          settings: { ...defaultSettings, ...b.settings },
-          activity: log(s.activity, { action: 'imported', entity: 'data', label: `Restored backup from ${b.exportedAt.slice(0, 10)}` }),
-        })),
-      loadSampleData: () => {
-        const fresh = buildSampleData();
-        set((s) => ({ ...fresh, activity: log(s.activity, { action: 'imported', entity: 'data', label: 'Loaded sample data' }) }));
-      },
-      clearAllData: () => set((s) => ({ transactions: [], loans: [], activity: log(s.activity, { action: 'purged', entity: 'data', label: 'All data cleared' }) })),
-      emptyTrash: () =>
-        set((s) => ({
-          transactions: s.transactions.filter((t) => !t.deletedAt),
-          loans: s.loans.filter((l) => !l.deletedAt),
-          activity: log(s.activity, { action: 'purged', entity: 'data', label: 'Trash emptied' }),
-        })),
-    }),
-    {
-      name: STORAGE_KEY,
-      version: 1,
-      storage: createJSONStorage(() => localStorage),
+    addTransaction: async (input) => {
+      const clean = cleanTx(input);
+      const t: Transaction = { ...clean, id: uid(), createdAt: nowISO(), updatedAt: nowISO() };
+      const s = get().settings;
+      const ops: Op[] = [{ kind: 'tx', op: 'put', doc: t }, activity({ action: 'created', entity: 'transaction', label: txLabel(t) })];
+      if (s.lastPaymentMethod !== t.paymentMethod) ops.push({ kind: 'settings', op: 'put', doc: { ...s, lastPaymentMethod: t.paymentMethod } });
+      return { id: t.id, result: await commit(ops) };
     },
-  ),
-);
+    updateTransaction: async (id, input) => {
+      const t = { ...findTx(id), ...cleanTx(input), updatedAt: nowISO() };
+      return commit([{ kind: 'tx', op: 'put', doc: t }, activity({ action: 'updated', entity: 'transaction', label: `Edited ${txLabel(t)}` })]);
+    },
+    deleteTransaction: async (id) => {
+      const t = findTx(id);
+      return commit([{ kind: 'tx', op: 'put', doc: { ...t, deletedAt: nowISO() } }, activity({ action: 'deleted', entity: 'transaction', label: `${txLabel(t)} moved to trash` })]);
+    },
+    restoreTransaction: async (id) => {
+      const { deletedAt: _d, ...t } = findTx(id);
+      return commit([{ kind: 'tx', op: 'put', doc: t }, activity({ action: 'restored', entity: 'transaction', label: `Restored ${txLabel(t)}` })]);
+    },
+    purgeTransaction: async (id) => {
+      const t = findTx(id);
+      return commit([{ kind: 'tx', op: 'delete', id }, activity({ action: 'purged', entity: 'transaction', label: `Permanently deleted ${txLabel(t)}` })]);
+    },
+
+    addLoan: async (input) => {
+      const l: Loan = { ...input, borrowerName: input.borrowerName.trim(), principal: round2(input.principal), id: uid(), repayments: [], createdAt: nowISO(), updatedAt: nowISO() };
+      validateLoan(l);
+      const result = await commit([putLoan(l), activity({ action: 'created', entity: 'loan', label: `Lent ${formatINR(l.principal)} to ${l.borrowerName}` })]);
+      return { id: l.id, result };
+    },
+    updateLoan: async (id, input) => {
+      const l: Loan = { ...findLoan(id), ...input };
+      if (input.principal !== undefined) l.principal = round2(input.principal);
+      validateLoan(l);
+      const principalPaid = l.repayments.reduce((a, r) => a + r.principalPortion, 0);
+      if (principalPaid > l.principal + 0.009) throw new ValidationError(`Principal cannot be less than the ${formatINR(principalPaid)} already repaid`);
+      return commit([putLoan(l), activity({ action: 'updated', entity: 'loan', label: `Edited loan · ${l.borrowerName}` })]);
+    },
+    deleteLoan: async (id) => {
+      const l = findLoan(id);
+      return commit([putLoan({ ...l, deletedAt: nowISO() }), activity({ action: 'deleted', entity: 'loan', label: `Loan to ${l.borrowerName} moved to trash` })]);
+    },
+    restoreLoan: async (id) => {
+      const { deletedAt: _d, ...l } = findLoan(id);
+      return commit([putLoan(l), activity({ action: 'restored', entity: 'loan', label: `Restored loan to ${l.borrowerName}` })]);
+    },
+    purgeLoan: async (id) => {
+      const l = findLoan(id);
+      return commit([{ kind: 'loan', op: 'delete', id }, activity({ action: 'purged', entity: 'loan', label: `Permanently deleted loan to ${l.borrowerName}` })]);
+    },
+    closeLoan: async (id, date, settlement) => {
+      const l = findLoan(id);
+      assertDate(date, 'Settlement date');
+      if (date < l.startDate) throw new ValidationError('Settlement date cannot be before the loan start date');
+      let repayments = l.repayments;
+      if (settlement && settlement.amount > 0) {
+        const r = cleanRepayment(settlement);
+        assertWithinOutstanding(l, r);
+        repayments = [...repayments, { ...r, id: uid(), createdAt: nowISO() }];
+      }
+      return commit([putLoan({ ...l, closedAt: date, repayments }), activity({ action: 'closed', entity: 'loan', label: `Loan to ${l.borrowerName} marked as fully repaid` })]);
+    },
+    reopenLoan: async (id) => {
+      const { closedAt: _c, ...l } = findLoan(id);
+      return commit([putLoan(l as Loan), activity({ action: 'updated', entity: 'loan', label: `Reopened loan to ${l.borrowerName}` })]);
+    },
+
+    addRepayment: async (loanId, input) => {
+      const l = findLoan(loanId);
+      const r = cleanRepayment(input);
+      assertWithinOutstanding(l, r);
+      return commit([
+        putLoan({ ...l, repayments: [...l.repayments, { ...r, id: uid(), createdAt: nowISO() }] }),
+        activity({ action: 'repayment', entity: 'repayment', label: `Received ${formatINR(r.amount)} from ${l.borrowerName}` }),
+      ]);
+    },
+    updateRepayment: async (loanId, repaymentId, input) => {
+      const l = findLoan(loanId);
+      const r = cleanRepayment(input);
+      assertWithinOutstanding(l, r, repaymentId);
+      return commit([
+        putLoan({ ...l, repayments: l.repayments.map((x) => (x.id === repaymentId ? { ...x, ...r } : x)) }),
+        activity({ action: 'updated', entity: 'repayment', label: `Edited repayment from ${l.borrowerName} · ${formatINR(r.amount)}` }),
+      ]);
+    },
+    deleteRepayment: async (loanId, repaymentId) => {
+      const l = findLoan(loanId);
+      const r = l.repayments.find((x) => x.id === repaymentId);
+      return commit([
+        putLoan({ ...l, repayments: l.repayments.filter((x) => x.id !== repaymentId) }),
+        activity({ action: 'deleted', entity: 'repayment', label: `Deleted repayment from ${l.borrowerName}${r ? ` · ${formatINR(r.amount)} (${r.date})` : ''}` }),
+      ]);
+    },
+
+    updateSettings: async (patch) => {
+      if (patch.theme) {
+        try {
+          localStorage.setItem(THEME_KEY, patch.theme);
+        } catch {
+          /* ignore */
+        }
+      }
+      return commit([{ kind: 'settings', op: 'put', doc: { ...get().settings, ...patch } }]);
+    },
+    importRecords: async (txs, loans, label) => {
+      txs.forEach((t) => cleanTx(t));
+      loans.forEach(validateLoan);
+      return commit([
+        ...txs.map((doc): Op => ({ kind: 'tx', op: 'put', doc })),
+        ...loans.map((doc): Op => ({ kind: 'loan', op: 'put', doc })),
+        activity({ action: 'imported', entity: 'data', label }),
+      ]);
+    },
+    replaceAll: async (data, label) => {
+      const s = get();
+      const keepTx = new Set(data.transactions.map((t) => t.id));
+      const keepLoan = new Set(data.loans.map((l) => l.id));
+      const ops: Op[] = [
+        ...s.transactions.filter((t) => !keepTx.has(t.id)).map((t): Op => ({ kind: 'tx', op: 'delete', id: t.id })),
+        ...s.loans.filter((l) => !keepLoan.has(l.id)).map((l): Op => ({ kind: 'loan', op: 'delete', id: l.id })),
+        ...data.transactions.map((doc): Op => ({ kind: 'tx', op: 'put', doc })),
+        ...data.loans.map((doc): Op => ({ kind: 'loan', op: 'put', doc: { ...doc, repayments: doc.repayments ?? [] } })),
+      ];
+      if (data.settings) ops.push({ kind: 'settings', op: 'put', doc: { ...defaultSettings, ...data.settings, theme: s.settings.theme } });
+      ops.push(activity({ action: 'imported', entity: 'data', label }));
+      return commit(ops);
+    },
+    loadSampleData: async () => get().replaceAll(buildSampleData(), 'Loaded sample data'),
+    clearAllData: async () => get().replaceAll({ transactions: [], loans: [] }, 'All data erased'),
+    emptyTrash: async () => {
+      const s = get();
+      return commit([
+        ...s.transactions.filter((t) => t.deletedAt).map((t): Op => ({ kind: 'tx', op: 'delete', id: t.id })),
+        ...s.loans.filter((l) => l.deletedAt).map((l): Op => ({ kind: 'loan', op: 'delete', id: l.id })),
+        activity({ action: 'purged', entity: 'data', label: 'Trash emptied' }),
+      ]);
+    },
+  };
+});
 
 /** Builds the JSON backup payload from the current state. */
 export function makeBackup(): BackupFile {
   const { transactions, loans, settings } = useStore.getState();
-  return { app: 'paisa-ledger', version: 1, exportedAt: nowISO(), transactions, loans, settings };
+  return { app: 'paisa-ledger', version: 2, exportedAt: nowISO(), transactions, loans, settings };
 }
 
 export function isBackupFile(x: unknown): x is BackupFile {
@@ -225,7 +313,7 @@ export function isBackupFile(x: unknown): x is BackupFile {
   return !!b && b.app === 'paisa-ledger' && Array.isArray(b.transactions) && Array.isArray(b.loans);
 }
 
-/** Keeps one rolling local snapshot per day as an extra safety net against accidental changes. */
+/** Device-only mode: keep one rolling snapshot per day as an extra safety net. */
 export function runDailyAutoBackup() {
   try {
     const raw = localStorage.getItem(AUTO_BACKUP_KEY);
@@ -247,7 +335,3 @@ export function readAutoBackup(): BackupFile | null {
     return null;
   }
 }
-
-/* Convenience selectors */
-export const useTransactions = () => useStore((s) => s.transactions);
-export const useLoans = () => useStore((s) => s.loans);

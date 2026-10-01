@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Calculator, Trash2 } from 'lucide-react';
+import { Calculator, Loader2, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sheet } from '../ui/Sheet';
@@ -10,6 +10,7 @@ import { formatINR } from '../../lib/format';
 import { expectedInterest, installmentCount } from '../../lib/loans';
 import { useStore, type LoanInput } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
+import { useSave } from '../../lib/useSave';
 import type { Compounding, InterestMethod, InterestType, Loan, PaymentFrequency } from '../../types';
 
 const FREQS: { value: PaymentFrequency; label: string }[] = [
@@ -26,7 +27,8 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
   const updateLoan = useStore((s) => s.updateLoan);
   const deleteLoan = useStore((s) => s.deleteLoan);
   const restoreLoan = useStore((s) => s.restoreLoan);
-  const { toast, confirm } = useUI();
+  const confirm = useUI((s) => s.confirm);
+  const { saving, run } = useSave();
   const navigate = useNavigate();
 
   const today = todayISO();
@@ -91,7 +93,7 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
     return { interest, total: round2(draft.principal + interest), n, perInstallment: round2((draft.principal + interest) / n) };
   }, [draft]);
 
-  const save = () => {
+  const save = async () => {
     const e: Record<string, string> = {};
     if (!f.borrowerName.trim()) e.borrowerName = "Enter the borrower's name";
     if (!(draft.principal > 0)) e.principal = 'Enter the amount lent';
@@ -99,6 +101,9 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
     if (f.dueDate <= f.startDate) e.dueDate = 'Due date must be after the start date';
     if (f.phone && !/^[+\d][\d\s-]{6,}$/.test(f.phone.trim())) e.phone = 'Enter a valid phone number';
     if (f.interestEndDate && f.interestEndDate < f.startDate) e.interestEndDate = 'Must be on/after the start date';
+    if (draft.interestType !== 'fixed' && draft.interestRate > 100) e.interestRate = 'Rate looks too high (max 100%)';
+    if (!f.startDate) e.startDate = 'Choose a start date';
+    if (draft.principal > 1e11) e.principal = 'Amount is too large';
     setErrors(e);
     if (Object.values(e).some(Boolean)) return;
 
@@ -118,14 +123,18 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
       notes: f.notes.trim(),
     };
     if (existing) {
-      updateLoan(existing.id, payload);
-      toast('Loan updated');
-      onClose();
+      if (await run(() => updateLoan(existing.id, payload), 'Loan updated')) onClose();
     } else {
-      const l = addLoan(payload);
-      toast(`Loan of ${formatINR(l.principal)} to ${l.borrowerName} added`);
-      onClose();
-      navigate(`/loans/${l.id}`);
+      let id = '';
+      const ok = await run(async () => {
+        const out = await addLoan(payload);
+        id = out.id;
+        return out;
+      }, `Loan of ${formatINR(payload.principal)} to ${payload.borrowerName} added`);
+      if (ok) {
+        onClose();
+        navigate(`/loans/${id}`);
+      }
     }
   };
 
@@ -138,10 +147,10 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
       danger: true,
     });
     if (!ok) return;
-    deleteLoan(existing.id);
-    onClose();
-    navigate('/loans');
-    toast('Loan deleted', { tone: 'danger', action: { label: 'Undo', run: () => restoreLoan(existing.id) } });
+    if (await run(() => deleteLoan(existing.id), 'Loan moved to trash', { undo: () => void restoreLoan(existing.id) })) {
+      onClose();
+      navigate('/loans');
+    }
   };
 
   const isFixed = f.interestType === 'fixed';
@@ -150,7 +159,7 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
     <Sheet
       wide
       title={existing ? 'Edit loan' : 'New loan'}
-      subtitle={existing ? existing.borrowerName : 'Record money you lent to someone'}
+      subtitle={existing ? existing.borrowerName : 'Money you lent to someone (kept separate from your expenses)'}
       onClose={onClose}
       footer={
         <div className="flex gap-2">
@@ -162,8 +171,9 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
           <button className="btn-secondary flex-1" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn-primary flex-1" onClick={save}>
-            {existing ? 'Save changes' : 'Add loan'}
+          <button className="btn-primary flex-1" onClick={save} disabled={saving}>
+            {saving && <Loader2 size={16} className="animate-spin" />}
+            {saving ? 'Saving…' : existing ? 'Save changes' : 'Add loan'}
           </button>
         </div>
       }
@@ -182,10 +192,10 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
           <Field label="Phone number" hint={errors.phone && <span className="text-rose-600">{errors.phone}</span>}>
             <input className="input" type="tel" inputMode="tel" placeholder="98765 43210" value={f.phone} onChange={(e) => set('phone', e.target.value)} />
           </Field>
-          <Field label="Principal amount (₹)" hint={errors.principal && <span className="text-rose-600">{errors.principal}</span>}>
+          <Field label="Amount lent (₹)" hint={errors.principal && <span className="text-rose-600">{errors.principal}</span>}>
             <input className="input num text-base font-semibold" type="number" inputMode="decimal" min="0" step="0.01" placeholder="50000" value={f.principal} onChange={(e) => set('principal', e.target.value)} />
           </Field>
-          <Field label="Loan start date">
+          <Field label="Date lent" hint={errors.startDate && <span className="text-rose-600">{errors.startDate}</span>}>
             <input className="input" type="date" value={f.startDate} onChange={(e) => setStart(e.target.value || today)} />
           </Field>
         </div>
@@ -206,7 +216,7 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
               />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={isFixed ? 'Fixed interest amount (₹)' : `Interest rate (% per ${f.interestType === 'monthly' ? 'month' : 'year'})`} hint={errors.interestRate}>
+              <Field label={isFixed ? 'Fixed interest amount (₹)' : `Interest rate (% per ${f.interestType === 'monthly' ? 'month' : 'year'})`} hint={errors.interestRate && <span className="text-rose-600">{errors.interestRate}</span>}>
                 <input className="input num" type="number" inputMode="decimal" min="0" step="0.01" value={f.interestRate} onChange={(e) => set('interestRate', e.target.value)} />
               </Field>
               {!isFixed && (

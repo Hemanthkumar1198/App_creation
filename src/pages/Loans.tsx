@@ -1,10 +1,10 @@
 import clsx from 'clsx';
-import { CheckCircle2, Download, HandCoins, Hourglass, Percent, Plus, Search } from 'lucide-react';
+import { CheckCircle2, Download, FileUp, HandCoins, Hourglass, Percent, Plus, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { LoanCard } from '../components/Rows';
-import { EmptyState, PageHeader, StatCard } from '../components/ui/common';
-import { todayISO } from '../lib/dates';
+import { EmptyState, PageHeader, StatCard, StatusBadge } from '../components/ui/common';
+import { formatDate, relativeDays, todayISO } from '../lib/dates';
 import { downloadCSV, loansRows } from '../lib/export';
 import { formatINR } from '../lib/format';
 import { computeLoan, portfolio } from '../lib/loans';
@@ -18,7 +18,7 @@ const TABS = [
   { value: 'overdue', label: 'Overdue' },
   { value: 'due-soon', label: 'Due soon' },
   { value: 'partially-paid', label: 'Partially paid' },
-  { value: 'fully-paid', label: 'Fully paid' },
+  { value: 'fully-paid', label: 'Fully repaid' },
 ] as const;
 type Tab = (typeof TABS)[number]['value'];
 type Sort = 'due' | 'outstanding' | 'name' | 'recent';
@@ -47,6 +47,15 @@ export default function Loans() {
     return c;
   }, [items]);
 
+  const upcoming = useMemo(
+    () =>
+      items
+        .filter(({ s }) => s.status !== 'fully-paid' && s.nextDueDate)
+        .sort((a, b) => a.s.nextDueDate!.localeCompare(b.s.nextDueDate!))
+        .slice(0, 5),
+    [items],
+  );
+
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return items
@@ -72,9 +81,12 @@ export default function Loans() {
     <div>
       <PageHeader
         title="Loans"
-        subtitle="Money you have lent to others"
+        subtitle="Money you lent to people — kept separate from your daily income & expenses"
         actions={
           <>
+            <Link to="/import" className="btn-secondary">
+              <FileUp size={16} /> <span className="hidden sm:inline">Import</span>
+            </Link>
             <button className="btn-secondary" onClick={() => downloadCSV('loans.csv', loansRows(all))}>
               <Download size={16} /> <span className="hidden sm:inline">Export</span>
             </button>
@@ -90,6 +102,42 @@ export default function Loans() {
         <StatCard label="Total repaid" value={pf.totalRepaid} icon={CheckCircle2} tone="income" />
         <StatCard label="Interest earned" value={pf.interestEarned} icon={Percent} tone="interest" hint={`Pending ${formatINR(pf.interestPending)}`} />
         <StatCard label="Outstanding" value={pf.outstanding} icon={Hourglass} tone="loan" />
+      </div>
+
+      <div className="mb-5 grid gap-4 lg:grid-cols-3">
+        <div className="grid grid-cols-3 gap-3 lg:col-span-1 lg:grid-cols-1">
+          {[
+            { label: 'Active loans', n: counts.active, cls: 'text-blue-600 dark:text-blue-300', tab: 'active' as Tab },
+            { label: 'Overdue', n: counts.overdue, cls: 'text-rose-600 dark:text-rose-400', tab: 'overdue' as Tab },
+            { label: 'Fully repaid', n: counts['fully-paid'], cls: 'text-emerald-600 dark:text-emerald-400', tab: 'fully-paid' as Tab },
+          ].map((c) => (
+            <button key={c.label} className="card flex flex-col items-start p-3.5 text-left transition hover:shadow-lg lg:flex-row lg:items-center lg:justify-between" onClick={() => setParams({ status: c.tab })}>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{c.label}</span>
+              <span className={`text-2xl font-extrabold ${c.cls}`}>{c.n}</span>
+            </button>
+          ))}
+        </div>
+        <div className="card card-pad lg:col-span-2">
+          <h2 className="mb-2 text-base font-bold">Upcoming due dates</h2>
+          {upcoming.length === 0 ? (
+            <p className="py-4 text-sm text-slate-500">No upcoming due dates.</p>
+          ) : (
+            <div className="-mx-2 divide-y divide-slate-100 dark:divide-white/5">
+              {upcoming.map(({ loan, s }) => (
+                <Link key={loan.id} to={`/loans/${loan.id}`} className="flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">{loan.borrowerName}</div>
+                    <div className={clsx('text-xs', s.status === 'overdue' || s.installmentMissed ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400')}>
+                      {formatDate(s.nextDueDate)} · {relativeDays(s.nextDueDate!, today)}
+                    </div>
+                  </div>
+                  <span className="num text-sm font-bold text-violet-600 dark:text-violet-300">{formatINR(s.totalOutstanding)}</span>
+                  <StatusBadge status={s.status} />
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="scrollbar-none -mx-4 mb-3 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:px-0">

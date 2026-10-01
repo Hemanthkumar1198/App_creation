@@ -1,4 +1,4 @@
-import { Copy, MessageCircle, MessageSquareText, Phone } from 'lucide-react';
+import { Copy, Loader2, MessageCircle, MessageSquareText, Phone } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Field, Row } from '../ui/common';
@@ -8,6 +8,7 @@ import { formatINR } from '../../lib/format';
 import { computeLoan, suggestRepaymentSplit } from '../../lib/loans';
 import { useStore } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
+import { useSave } from '../../lib/useSave';
 import type { PaymentMethod } from '../../types';
 
 /** "Mark as Paid": optionally records the settlement payment, then closes the loan. */
@@ -15,23 +16,22 @@ export function CloseLoanForm({ loanId, onClose }: { loanId: string; onClose: ()
   const loan = useStore((s) => s.loans.find((l) => l.id === loanId));
   const closeLoan = useStore((s) => s.closeLoan);
   const lastMethod = useStore((s) => s.settings.lastPaymentMethod);
-  const toast = useUI((s) => s.toast);
+  const { saving, run } = useSave();
   const [date, setDate] = useState(todayISO());
   const [record, setRecord] = useState(true);
   const [method, setMethod] = useState<PaymentMethod>(lastMethod);
   const due = useMemo(() => (loan ? suggestRepaymentSplit(loan, Number.MAX_SAFE_INTEGER, date) : null), [loan, date]);
   if (!loan || !due) return null;
 
-  const save = () => {
-    closeLoan(
+  const save = async () => {
+    const ok = await run(() => closeLoan(
       loan.id,
       date,
       record && due.outstanding > 0
         ? { amount: due.outstanding, date, paymentMethod: method, principalPortion: due.principalDue, interestPortion: due.interestDue, notes: 'Final settlement' }
         : undefined,
-    );
-    toast(`Loan to ${loan.borrowerName} marked as paid`);
-    onClose();
+    ), `Loan to ${loan.borrowerName} marked as fully repaid`);
+    if (ok) onClose();
   };
 
   return (
@@ -44,8 +44,8 @@ export function CloseLoanForm({ loanId, onClose }: { loanId: string; onClose: ()
           <button className="btn-secondary flex-1" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn flex-1 bg-emerald-600 text-white hover:bg-emerald-700" onClick={save}>
-            Mark as paid
+          <button className="btn flex-1 bg-emerald-600 text-white hover:bg-emerald-700" onClick={save} disabled={saving}>
+            {saving && <Loader2 size={16} className="animate-spin" />} Mark as paid
           </button>
         </div>
       }

@@ -11,14 +11,16 @@ import {
   Percent,
   PiggyBank,
   Undo2,
+  TrendingUp,
+  Sheet,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { CashFlowChart, CategoryBars, IncomeExpenseChart, SingleSeriesBar, TrendArea } from '../components/charts/Charts';
 import { PageHeader, SectionTitle, Segmented, StatCard } from '../components/ui/common';
 import { todayISO } from '../lib/dates';
-import { downloadCSV, downloadPDF } from '../lib/export';
+import { exportData, type ExportFormat } from '../lib/export';
 import { formatINR } from '../lib/format';
-import { categoryBreakdown, inRange, live, periodFor, periodReport, shiftAnchor, trailingPeriods, type PeriodKind } from '../lib/reports';
+import { categoryBreakdown, live, periodFor, periodReport, shiftAnchor, trailingPeriods, txTotals, type PeriodKind } from '../lib/reports';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
 
@@ -32,7 +34,7 @@ export default function Reports() {
   const today = todayISO();
   const [kind, setKind] = useState<PeriodKind>('monthly');
   const [anchor, setAnchor] = useState(today);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'' | ExportFormat>('');
 
   const txs = useMemo(() => live(txsAll), [txsAll]);
   const loans = useMemo(() => live(loansAll), [loansAll]);
@@ -45,54 +47,21 @@ export default function Reports() {
     () => trailingPeriods(kind, anchor, TRAIL[kind]).map((p) => ({ p, r: periodReport(txs, loans, p, today) })),
     [kind, anchor, txs, loans, today],
   );
-  const cashFlow = useMemo(
-    () => trailingPeriods('monthly', anchor, 12).map((p) => ({ label: p.short, value: periodReport(txs, loans, p, today).cashFlow })),
-    [anchor, txs, loans, today],
+  const savingsTrend = useMemo(
+    () => trailingPeriods('monthly', anchor, 12).map((p) => ({ label: p.short, value: txTotals(txs, p.start, p.end).net })),
+    [anchor, txs],
   );
 
-  const summary: [string, number][] = [
-    ['Total income', report.income],
-    ['Total expenses', report.expense],
-    ['Net savings', report.savings],
-    ['Total lent', report.lent],
-    ['Total repaid', report.repaid],
-    ['Interest earned', report.interestEarned],
-    ['Outstanding loans (end of period)', report.outstanding],
-  ];
-
-  const periodTxs = () => txs.filter((t) => inRange(t.date, period.start, period.end));
-
-  const exportCSV = () => {
-    const rows: (string | number)[][] = [
-      ['Paisa Ledger report', `${kind} · ${period.label}`],
-      [],
-      ['Summary', 'Amount (INR)'],
-      ...summary.map(([k, v]) => [k, v.toFixed(2)]),
-      [],
-      ['Expense category', 'Amount (INR)', 'Share %'],
-      ...cats.map((c) => [c.category, c.amount.toFixed(2), c.share.toFixed(1)]),
-      [],
-      [`Trend (last ${TRAIL[kind]} ${NOUN[kind]})`, 'Income', 'Expenses', 'Net savings', 'Lent', 'Repaid', 'Interest earned', 'Outstanding'],
-      ...trend.map(({ p, r }) => [p.label, r.income.toFixed(2), r.expense.toFixed(2), r.savings.toFixed(2), r.lent.toFixed(2), r.repaid.toFixed(2), r.interestEarned.toFixed(2), r.outstanding.toFixed(2)]),
-      [],
-      ['Date', 'Type', 'Category', 'Description', 'Amount (INR)', 'Payment method', 'Notes'],
-      ...periodTxs()
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .map((t) => [t.date, t.type, t.category, t.description, t.amount.toFixed(2), t.paymentMethod, t.notes]),
-    ];
-    downloadCSV(`report-${kind}-${period.start}.csv`, rows);
-    toast('CSV exported — opens in Excel');
-  };
-
-  const exportPDF = async () => {
-    setBusy(true);
+  const doExport = async (format: ExportFormat) => {
+    setBusy(format);
     try {
-      await downloadPDF({ title: `${kind[0].toUpperCase()}${kind.slice(1)} report`, periodLabel: period.label, summary, categories: cats, transactions: periodTxs(), loans });
-      toast('PDF downloaded');
-    } catch {
-      toast('Could not create PDF', { tone: 'danger' });
+      await exportData(format, txs, loans, { start: period.start, end: period.end, label: `${kind[0].toUpperCase()}${kind.slice(1)} report ${period.label}` }, { categories: cats });
+      toast(format === 'pdf' ? 'PDF downloaded' : format === 'xlsx' ? 'Excel file downloaded' : 'CSV downloaded');
+    } catch (e) {
+      console.error(e);
+      toast('Export failed — please try again', { tone: 'danger' });
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   };
 
@@ -103,11 +72,14 @@ export default function Reports() {
         subtitle="Income, expenses and loans over time"
         actions={
           <>
-            <button className="btn-secondary" onClick={exportCSV}>
-              <FileSpreadsheet size={16} /> Excel / CSV
+            <button className="btn-secondary" onClick={() => doExport('xlsx')} disabled={!!busy}>
+              {busy === 'xlsx' ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />} Excel
             </button>
-            <button className="btn-primary" onClick={exportPDF} disabled={busy}>
-              {busy ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />} PDF
+            <button className="btn-secondary" onClick={() => doExport('csv')} disabled={!!busy}>
+              {busy === 'csv' ? <Loader2 size={16} className="animate-spin" /> : <Sheet size={16} />} CSV
+            </button>
+            <button className="btn-primary" onClick={() => doExport('pdf')} disabled={!!busy}>
+              {busy === 'pdf' ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />} PDF
             </button>
           </>
         }
@@ -146,15 +118,24 @@ export default function Reports() {
         </div>
       </div>
 
-      <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatCard label="Total income" value={report.income} icon={ArrowDownLeft} tone="income" />
-        <StatCard label="Total expenses" value={report.expense} icon={ArrowUpRight} tone="expense" />
-        <StatCard label="Net savings" value={report.savings} icon={PiggyBank} tone={report.savings >= 0 ? 'income' : 'expense'} hint={report.income ? `${((report.savings / report.income) * 100).toFixed(0)}% of income` : undefined} />
-        <StatCard label="Total lent" value={report.lent} icon={HandCoins} tone="loan" />
-        <StatCard label="Total repaid" value={report.repaid} icon={Undo2} tone="income" hint={`Principal ${formatINR(report.principalRepaid)}`} />
-        <StatCard label="Interest earned" value={report.interestEarned} icon={Percent} tone="interest" />
-        <StatCard label="Outstanding loans" value={report.outstanding} icon={Hourglass} tone="loan" hint="As of period end" />
-        <StatCard label="Net cash flow" value={report.cashFlow} icon={PiggyBank} tone={report.cashFlow >= 0 ? 'income' : 'expense'} hint="After lending & repayments" />
+      <section>
+        <SectionTitle title="Personal finance" subtitle="Income & daily expenses — excludes loans" />
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <StatCard label="Total income" value={report.income} icon={ArrowDownLeft} tone="income" />
+          <StatCard label="Total expenses" value={report.expense} icon={ArrowUpRight} tone="expense" />
+          <StatCard label="Net savings" value={report.savings} icon={PiggyBank} tone={report.savings >= 0 ? 'income' : 'expense'} hint={report.income ? `${((report.savings / report.income) * 100).toFixed(0)}% of income` : undefined} />
+          <StatCard label="Investments" value={report.investments} icon={TrendingUp} tone="brand" hint="Investment category" />
+        </div>
+      </section>
+
+      <section>
+        <SectionTitle title="Lending" subtitle="Money lent to people — tracked separately" />
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <StatCard label="Total lent" value={report.lent} icon={HandCoins} tone="loan" />
+          <StatCard label="Total repaid" value={report.repaid} icon={Undo2} tone="income" hint={`Principal ${formatINR(report.principalRepaid)}`} />
+          <StatCard label="Interest earned" value={report.interestEarned} icon={Percent} tone="interest" />
+          <StatCard label="Outstanding loans" value={report.outstanding} icon={Hourglass} tone="loan" hint="As of period end" />
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-5">
@@ -180,8 +161,8 @@ export default function Reports() {
       </section>
 
       <section className="card card-pad">
-        <SectionTitle title="Monthly cash flow" subtitle="Income − expenses − money lent + repayments, last 12 months" />
-        <CashFlowChart data={cashFlow} />
+        <SectionTitle title="Monthly savings" subtitle="Income − expenses for the last 12 months (loans excluded)" />
+        <CashFlowChart data={savingsTrend} />
       </section>
 
       <section className="card overflow-hidden">

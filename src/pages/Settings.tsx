@@ -1,14 +1,23 @@
 import clsx from 'clsx';
 import {
   Bell,
+  CheckCircle2,
+  Cloud,
   Database,
-  Download,
   FileJson,
+  FileSpreadsheet,
+  FileText,
+  FileUp,
+  HardDrive,
   History,
+  Loader2,
+  LogOut,
   Monitor,
   Moon,
   RotateCcw,
+  Sheet,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Sun,
   Trash2,
@@ -16,17 +25,23 @@ import {
   User,
 } from 'lucide-react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import type { ConfirmationResult } from 'firebase/auth';
 import { PageHeader, Segmented } from '../components/ui/common';
 import { formatDate } from '../lib/dates';
-import { downloadCSV, downloadJSON, loansRows, repaymentsRows, transactionsRows } from '../lib/export';
+import { downloadJSON, exportData, type ExportFormat } from '../lib/export';
 import { formatINR } from '../lib/format';
+import { toE164 } from '../lib/phone';
+import { useSave } from '../lib/useSave';
+import { friendlyError, linkGoogle, linkPhone, refreshUser, resetVerifier, signOut, useSession } from '../store/useSession';
 import { isBackupFile, makeBackup, readAutoBackup, useStore } from '../store/useStore';
+import { useTheme } from '../store/useTheme';
 import { useUI } from '../store/useUI';
 import type { ThemeMode } from '../types';
 
-function Section({ icon: Icon, title, desc, children }: { icon: typeof User; title: string; desc?: string; children: ReactNode }) {
+function Section({ icon: Icon, title, desc, children, id }: { icon: typeof User; title: string; desc?: string; children: ReactNode; id?: string }) {
   return (
-    <section className="card card-pad">
+    <section className="card card-pad" id={id}>
       <div className="mb-4 flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-100 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
           <Icon size={18} />
@@ -41,24 +56,185 @@ function Section({ icon: Icon, title, desc, children }: { icon: typeof User; tit
   );
 }
 
+function AccountSection() {
+  const user = useSession((s) => s.user);
+  const mode = useStore((s) => s.mode);
+  const { confirm, toast } = useUI();
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [step, setStep] = useState<'' | 'phone' | 'otp'>('');
+  const [busy, setBusy] = useState(false);
+  const conf = useRef<ConfirmationResult | null>(null);
+
+  if (mode === 'local' || !user) {
+    return (
+      <Section icon={HardDrive} title="Device-only mode" desc="Cloud sync is not configured for this website yet.">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Your data is stored in this browser only. To enable secure sign-in (Google / mobile OTP) and cloud backup across devices, the site owner needs to add a Firebase project — see the README “Enable sign-in & cloud backup”.
+          Until then, download a backup regularly.
+        </p>
+      </Section>
+    );
+  }
+
+  const hasGoogle = user.providers.includes('google.com');
+  const hasPhone = user.providers.includes('phone');
+  const act = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      toast(ok);
+      return true;
+    } catch (e) {
+      toast(friendlyError(e), { tone: 'danger' });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section icon={ShieldCheck} title="Account & security" desc="Your data is stored securely in your account and syncs across devices.">
+      <div className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3 dark:bg-white/5">
+        {user.photoURL ? (
+          <img src={user.photoURL} alt="" className="h-11 w-11 rounded-full" referrerPolicy="no-referrer" />
+        ) : (
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-blue-500 font-bold text-white">{user.name.slice(0, 1).toUpperCase()}</span>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold">{user.name}</div>
+          <div className="truncate text-xs text-slate-500">{[user.email, user.phone].filter(Boolean).join(' · ')}</div>
+        </div>
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+          <Cloud size={12} /> Synced
+        </span>
+      </div>
+
+      <div className="mt-4">
+        <span className="label">Sign-in methods</span>
+        <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">Link both so you can always get back into the same account (and the same data).</p>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 dark:border-white/10">
+            <span className="text-sm font-medium">Google {user.email && hasGoogle ? `· ${user.email}` : ''}</span>
+            {hasGoogle ? (
+              <CheckCircle2 size={18} className="text-emerald-600" />
+            ) : (
+              <button className="btn-secondary py-1.5 text-xs" disabled={busy} onClick={() => act(linkGoogle, 'Google account linked')}>
+                Link Google
+              </button>
+            )}
+          </div>
+          <div className="rounded-xl border border-slate-200 p-3 dark:border-white/10">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium">Mobile number {hasPhone && user.phone ? `· ${user.phone}` : ''}</span>
+              {hasPhone ? (
+                <CheckCircle2 size={18} className="text-emerald-600" />
+              ) : (
+                !step && (
+                  <button className="btn-secondary py-1.5 text-xs" onClick={() => setStep('phone')}>
+                    <Smartphone size={14} /> Link number
+                  </button>
+                )
+              )}
+            </div>
+            {step === 'phone' && (
+              <div className="mt-3 flex gap-2">
+                <input className="input" type="tel" placeholder="98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} autoFocus />
+                <button
+                  className="btn-primary shrink-0"
+                  disabled={busy}
+                  onClick={async () => {
+                    const e164 = toE164(phone);
+                    if (!e164) return toast('Enter a valid mobile number', { tone: 'danger' });
+                    if (await act(async () => (conf.current = await linkPhone(e164, 'link-recaptcha')), 'OTP sent')) setStep('otp');
+                  }}
+                >
+                  {busy && <Loader2 size={14} className="animate-spin" />} Send OTP
+                </button>
+              </div>
+            )}
+            {step === 'otp' && (
+              <div className="mt-3 flex gap-2">
+                <input className="input num tracking-widest" inputMode="numeric" maxLength={6} placeholder="6-digit OTP" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} autoFocus />
+                <button
+                  className="btn-primary shrink-0"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (
+                      await act(async () => {
+                        await conf.current?.confirm(code);
+                        await refreshUser();
+                      }, 'Mobile number linked')
+                    ) {
+                      setStep('');
+                      resetVerifier();
+                    }
+                  }}
+                >
+                  Verify
+                </button>
+              </div>
+            )}
+            <div id="link-recaptcha" />
+          </div>
+        </div>
+      </div>
+
+      <button
+        className="btn-secondary mt-4 w-full text-rose-600 dark:text-rose-400"
+        onClick={async () => {
+          if (await confirm({ title: 'Sign out?', message: 'Your data stays safe in your account. The offline copy on this device will be removed.', confirmLabel: 'Sign out' })) {
+            try {
+              await signOut();
+            } catch (e) {
+              toast(friendlyError(e), { tone: 'danger' });
+            }
+          }
+        }}
+      >
+        <LogOut size={16} /> Sign out
+      </button>
+    </Section>
+  );
+}
+
 export default function Settings() {
   const st = useStore();
-  const { settings, updateSettings, transactions, loans, activity } = st;
+  const { settings, transactions, loans, activity, mode } = st;
   const { confirm, toast } = useUI();
+  const { saving, run } = useSave();
+  const theme = useTheme((s) => s.theme);
+  const setTheme = useTheme((s) => s.setTheme);
   const fileRef = useRef<HTMLInputElement>(null);
   const [showAllActivity, setShowAllActivity] = useState(false);
+  const [exporting, setExporting] = useState<'' | ExportFormat>('');
+  const [name, setName] = useState(settings.userName);
 
   const trash = useMemo(
-    () => [
-      ...transactions.filter((t) => t.deletedAt).map((t) => ({ id: t.id, kind: 'transaction' as const, label: `${t.description || t.category} · ${formatINR(t.amount)}`, at: t.deletedAt! })),
-      ...loans.filter((l) => l.deletedAt).map((l) => ({ id: l.id, kind: 'loan' as const, label: `Loan to ${l.borrowerName} · ${formatINR(l.principal)}`, at: l.deletedAt! })),
-    ].sort((a, b) => b.at.localeCompare(a.at)),
+    () =>
+      [
+        ...transactions.filter((t) => t.deletedAt).map((t) => ({ id: t.id, kind: 'transaction' as const, label: `${t.description || t.category} · ${formatINR(t.amount)}`, at: t.deletedAt! })),
+        ...loans.filter((l) => l.deletedAt).map((l) => ({ id: l.id, kind: 'loan' as const, label: `Loan to ${l.borrowerName} · ${formatINR(l.principal)}`, at: l.deletedAt! })),
+      ].sort((a, b) => b.at.localeCompare(a.at)),
     [transactions, loans],
   );
 
   const backup = () => {
     downloadJSON(`paisa-ledger-backup-${new Date().toISOString().slice(0, 10)}.json`, makeBackup());
     toast('Backup downloaded');
+  };
+
+  const exportAll = async (format: ExportFormat) => {
+    setExporting(format);
+    try {
+      await exportData(format, transactions, loans, { label: `Full export ${formatDate(new Date().toISOString().slice(0, 10))}` });
+      toast('Export downloaded');
+    } catch (e) {
+      console.error(e);
+      toast('Export failed — please try again', { tone: 'danger' });
+    } finally {
+      setExporting('');
+    }
   };
 
   const restoreFile = async (file: File) => {
@@ -72,49 +248,51 @@ export default function Settings() {
         danger: true,
       });
       if (!ok) return;
-      st.importBackup(data);
-      toast('Backup restored');
+      run(() => st.replaceAll(data, `Restored backup from ${data.exportedAt.slice(0, 10)}`), 'Backup restored');
     } catch {
-      toast('That file is not a valid Paisa Ledger backup', { tone: 'danger' });
+      toast('That file is not a valid Paisa Ledger backup (.json). To bring in Excel/CSV/PDF files, use Import data.', { tone: 'danger' });
     }
   };
 
-  const auto = readAutoBackup();
-  const storageKB = useMemo(() => {
-    try {
-      return Math.round(((localStorage.getItem('paisa-ledger:v1') ?? '').length * 2) / 1024);
-    } catch {
-      return 0;
-    }
-  }, [transactions, loans]);
+  const auto = mode === 'local' ? readAutoBackup() : null;
 
   const enableNotifications = async (on: boolean) => {
-    if (on && 'Notification' in window) {
-      const perm = await Notification.requestPermission();
-      if (perm !== 'granted') {
-        toast('Notifications were blocked by the browser', { tone: 'danger' });
-        return;
+    if (on) {
+      if (!('Notification' in window)) return toast('This browser does not support notifications', { tone: 'danger' });
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') return toast('Notifications were blocked by the browser', { tone: 'danger' });
+      } catch {
+        return toast('Could not enable notifications', { tone: 'danger' });
       }
     }
-    updateSettings({ browserNotifications: on });
-    toast(on ? 'Browser reminders enabled' : 'Browser reminders disabled', { tone: 'info' });
+    run(() => st.updateSettings({ browserNotifications: on }), on ? 'Browser reminders enabled' : 'Browser reminders disabled');
   };
 
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Preferences, backups and data safety" />
+      <PageHeader title="Settings" subtitle="Account, backups and data safety" />
       <div className="grid gap-4 lg:grid-cols-2">
+        <AccountSection />
+
         <Section icon={User} title="Profile & appearance">
           <div className="space-y-4">
             <div>
               <label className="label" htmlFor="name">Your name</label>
-              <input id="name" className="input" placeholder="Used in greetings and reminder messages" value={settings.userName} onChange={(e) => updateSettings({ userName: e.target.value })} />
+              <div className="flex gap-2">
+                <input id="name" className="input" placeholder="Used in greetings and reminder messages" value={name} onChange={(e) => setName(e.target.value)} />
+                {name !== settings.userName && (
+                  <button className="btn-primary shrink-0" disabled={saving} onClick={() => run(() => st.updateSettings({ userName: name.trim().slice(0, 60) }), 'Name saved')}>
+                    Save
+                  </button>
+                )}
+              </div>
             </div>
             <div>
-              <span className="label">Theme</span>
+              <span className="label">Theme (this device)</span>
               <Segmented<ThemeMode>
-                value={settings.theme}
-                onChange={(theme) => updateSettings({ theme })}
+                value={theme}
+                onChange={setTheme}
                 options={[
                   { value: 'light', label: <span className="flex items-center justify-center gap-1.5"><Sun size={14} /> Light</span> },
                   { value: 'dark', label: <span className="flex items-center justify-center gap-1.5"><Moon size={14} /> Dark</span> },
@@ -126,11 +304,71 @@ export default function Settings() {
           </div>
         </Section>
 
+        <Section icon={FileSpreadsheet} title="Export & backup" desc="Everything is exported in separate sections: Daily Expenses, Income, Investments, Loans, Loan Repayments and Outstanding Loans.">
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                ['xlsx', 'Excel', FileSpreadsheet],
+                ['csv', 'CSV', Sheet],
+                ['pdf', 'PDF', FileText],
+              ] as const
+            ).map(([f, label, Icon]) => (
+              <button key={f} className="btn-secondary" disabled={!!exporting} onClick={() => exportAll(f)}>
+                {exporting === f ? <Loader2 size={16} className="animate-spin" /> : <Icon size={16} />} {label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <button className="btn-primary" onClick={backup}>
+              <FileJson size={16} /> Full backup (.json)
+            </button>
+            <button className="btn-secondary" disabled={saving} onClick={() => fileRef.current?.click()}>
+              <Upload size={16} /> Restore backup
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) restoreFile(f);
+                e.target.value = '';
+              }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            {mode === 'cloud' ? 'Your data is already saved in your account. A .json backup is an extra copy you control.' : 'Data is stored only in this browser — download a backup regularly.'}
+          </p>
+          {auto && (
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 text-sm dark:bg-white/5">
+              <span>
+                <span className="block font-semibold">Automatic daily snapshot</span>
+                <span className="text-slate-500 dark:text-slate-400">
+                  {formatDate(auto.exportedAt.slice(0, 10))} · {auto.transactions.length} transactions, {auto.loans.length} loans
+                </span>
+              </span>
+              <button
+                className="btn-secondary shrink-0 py-2"
+                onClick={async () => {
+                  if (await confirm({ title: 'Restore daily snapshot?', message: 'Your current data will be replaced with the snapshot taken when you first opened the app today.', confirmLabel: 'Restore', danger: true }))
+                    run(() => st.replaceAll(auto, 'Restored daily snapshot'), 'Snapshot restored');
+                }}
+              >
+                <RotateCcw size={15} /> Restore
+              </button>
+            </div>
+          )}
+          <Link to="/import" className="btn-ghost mt-2 w-full">
+            <FileUp size={16} /> Import from Excel, CSV or PDF
+          </Link>
+        </Section>
+
         <Section icon={Bell} title="Reminders" desc="Due dates, overdue loans, pending repayments and a monthly expense summary appear under the bell icon.">
           <div className="space-y-4">
             <div>
               <label className="label" htmlFor="days">Remind me about loans due within</label>
-              <select id="days" className="input" value={settings.reminderDays} onChange={(e) => updateSettings({ reminderDays: Number(e.target.value) })}>
+              <select id="days" className="input" value={settings.reminderDays} onChange={(e) => run(() => st.updateSettings({ reminderDays: Number(e.target.value) }), 'Reminder window saved')}>
                 {[3, 5, 7, 10, 14, 30].map((d) => (
                   <option key={d} value={d}>
                     {d} days
@@ -148,61 +386,6 @@ export default function Settings() {
           </div>
         </Section>
 
-        <Section icon={ShieldCheck} title="Backup & restore" desc="Your data is stored on this device. Download a backup regularly and keep it somewhere safe.">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button className="btn-primary" onClick={backup}>
-              <FileJson size={16} /> Download backup
-            </button>
-            <button className="btn-secondary" onClick={() => fileRef.current?.click()}>
-              <Upload size={16} /> Restore from file
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) restoreFile(f);
-                e.target.value = '';
-              }}
-            />
-          </div>
-          {auto && (
-            <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 text-sm dark:bg-white/5">
-              <span>
-                <span className="block font-semibold">Automatic daily snapshot</span>
-                <span className="text-slate-500 dark:text-slate-400">
-                  {formatDate(auto.exportedAt.slice(0, 10))} · {auto.transactions.length} transactions, {auto.loans.length} loans
-                </span>
-              </span>
-              <button
-                className="btn-secondary shrink-0 py-2"
-                onClick={async () => {
-                  if (await confirm({ title: 'Restore daily snapshot?', message: 'Your current data will be replaced with the snapshot taken when you first opened the app today.', confirmLabel: 'Restore', danger: true })) {
-                    st.importBackup(auto);
-                    toast('Snapshot restored');
-                  }
-                }}
-              >
-                <RotateCcw size={15} /> Restore
-              </button>
-            </div>
-          )}
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <button className="btn-secondary" onClick={() => downloadCSV('transactions.csv', transactionsRows(transactions))}>
-              <Download size={15} /> Transactions
-            </button>
-            <button className="btn-secondary" onClick={() => downloadCSV('loans.csv', loansRows(loans))}>
-              <Download size={15} /> Loans
-            </button>
-            <button className="btn-secondary" onClick={() => downloadCSV('repayments.csv', repaymentsRows(loans))}>
-              <Download size={15} /> Repayments
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">CSV files open directly in Excel or Google Sheets.</p>
-        </Section>
-
         <Section icon={Trash2} title={`Trash (${trash.length})`} desc="Deleted transactions and loans are kept here until you remove them permanently.">
           {trash.length === 0 ? (
             <p className="rounded-2xl bg-slate-50 p-4 text-center text-sm text-slate-500 dark:bg-white/5">Trash is empty.</p>
@@ -215,22 +398,16 @@ export default function Settings() {
                       <div className="truncate text-sm font-medium">{t.label}</div>
                       <div className="text-xs text-slate-500">Deleted {formatDate(t.at.slice(0, 10))}</div>
                     </div>
-                    <button
-                      className="btn-ghost px-2.5 py-1.5 text-xs"
-                      onClick={() => {
-                        t.kind === 'loan' ? st.restoreLoan(t.id) : st.restoreTransaction(t.id);
-                        toast('Restored');
-                      }}
-                    >
+                    <button className="btn-ghost px-2.5 py-1.5 text-xs" disabled={saving} onClick={() => run(() => (t.kind === 'loan' ? st.restoreLoan(t.id) : st.restoreTransaction(t.id)), 'Restored')}>
                       <RotateCcw size={14} /> Restore
                     </button>
                     <button
                       className="btn-ghost px-2.5 py-1.5 text-xs text-rose-600"
                       aria-label="Delete permanently"
+                      disabled={saving}
                       onClick={async () => {
-                        if (await confirm({ title: 'Delete permanently?', message: `${t.label} will be erased forever. This cannot be undone.`, confirmLabel: 'Delete forever', danger: true })) {
-                          t.kind === 'loan' ? st.purgeLoan(t.id) : st.purgeTransaction(t.id);
-                        }
+                        if (await confirm({ title: 'Delete permanently?', message: `${t.label} will be erased forever. This cannot be undone.`, confirmLabel: 'Delete forever', danger: true }))
+                          run(() => (t.kind === 'loan' ? st.purgeLoan(t.id) : st.purgeTransaction(t.id)), 'Deleted permanently');
                       }}
                     >
                       <Trash2 size={14} />
@@ -240,8 +417,9 @@ export default function Settings() {
               </div>
               <button
                 className="btn-ghost mt-2 text-rose-600"
+                disabled={saving}
                 onClick={async () => {
-                  if (await confirm({ title: 'Empty trash?', message: `${trash.length} item(s) will be erased forever.`, confirmLabel: 'Empty trash', danger: true })) st.emptyTrash();
+                  if (await confirm({ title: 'Empty trash?', message: `${trash.length} item(s) will be erased forever.`, confirmLabel: 'Empty trash', danger: true })) run(st.emptyTrash, 'Trash emptied');
                 }}
               >
                 Empty trash
@@ -280,34 +458,32 @@ export default function Settings() {
           )}
         </Section>
 
-        <Section icon={Database} title="Data" desc={`${transactions.filter((t) => !t.deletedAt).length} transactions · ${loans.filter((l) => !l.deletedAt).length} loans · ~${storageKB} KB on this device`}>
+        <Section icon={Database} title="Data" desc={`${transactions.filter((t) => !t.deletedAt).length} transactions · ${loans.filter((l) => !l.deletedAt).length} loans · ${mode === 'cloud' ? 'saved to your account' : 'stored in this browser'}`}>
           <div className="grid gap-2 sm:grid-cols-2">
             <button
               className="btn-secondary"
+              disabled={saving}
               onClick={async () => {
-                if (await confirm({ title: 'Load sample data?', message: 'This replaces your current transactions and loans with demo data. Download a backup first if you want to keep your data.', confirmLabel: 'Load sample data', danger: true })) {
-                  st.loadSampleData();
-                  toast('Sample data loaded');
-                }
+                if (await confirm({ title: 'Load demo data?', message: 'This REPLACES your current transactions and loans with demo data. Download a backup first if you want to keep your data.', confirmLabel: 'Replace with demo data', danger: true, typeToConfirm: transactions.length || loans.length ? 'DEMO' : undefined }))
+                  run(st.loadSampleData, 'Demo data loaded');
               }}
             >
-              <Sparkles size={16} /> Load sample data
+              <Sparkles size={16} /> Load demo data
             </button>
             <button
               className="btn-secondary text-rose-600 dark:text-rose-400"
+              disabled={saving}
               onClick={async () => {
                 if (
                   await confirm({
                     title: 'Erase all data?',
-                    message: 'Every transaction, loan and repayment on this device will be erased. This cannot be undone.',
+                    message: `Every transaction, loan and repayment ${mode === 'cloud' ? 'in your account' : 'on this device'} will be erased. This cannot be undone — download a backup first.`,
                     confirmLabel: 'Erase everything',
                     danger: true,
                     typeToConfirm: 'DELETE',
                   })
-                ) {
-                  st.clearAllData();
-                  toast('All data erased', { tone: 'danger' });
-                }
+                )
+                  run(st.clearAllData, 'All data erased');
               }}
             >
               <Trash2 size={16} /> Erase all data
@@ -315,7 +491,7 @@ export default function Settings() {
           </div>
         </Section>
       </div>
-      <p className="mt-6 text-center text-xs text-slate-400">Paisa Ledger v1.0 · Works offline · Data never leaves your device</p>
+      <p className="mt-6 text-center text-xs text-slate-400">Paisa Ledger v2.0 · {mode === 'cloud' ? 'Cloud sync on · works offline' : 'Device-only mode'}</p>
     </div>
   );
 }

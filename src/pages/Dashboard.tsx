@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDot,
-  Clock,
   HandCoins,
   Hourglass,
   Landmark,
@@ -15,6 +14,8 @@ import {
   TrendingDown,
   TrendingUp,
   Wallet,
+  FileUp,
+  Sparkles,
   AlertCircle,
 } from 'lucide-react';
 import { useMemo } from 'react';
@@ -25,9 +26,44 @@ import { EmptyState, SectionTitle, StatCard, StatusBadge } from '../components/u
 import { endOfMonth, formatDate, formatMonth, relativeDays, startOfMonth, todayISO } from '../lib/dates';
 import { formatINR } from '../lib/format';
 import { computeLoan, portfolio } from '../lib/loans';
-import { categoryBreakdown, live, overallBalance, trailingPeriods, txTotals } from '../lib/reports';
+import { categoryBreakdown, live, personalBalance, trailingPeriods, txTotals } from '../lib/reports';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
+import { useSave } from '../lib/useSave';
+
+function GettingStarted() {
+  const open = useUI((s) => s.open);
+  const loadSample = useStore((s) => s.loadSampleData);
+  const confirm = useUI((s) => s.confirm);
+  const { saving, run } = useSave();
+  return (
+    <section className="card card-pad">
+      <h2 className="text-lg font-bold">Welcome! Let's set up your ledger</h2>
+      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Add your first entry, bring in records from Excel/CSV/PDF, or explore with demo data.</p>
+      <div className="mt-4 grid gap-2 sm:grid-cols-4">
+        <button className="btn bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => open({ kind: 'tx', txType: 'income' })}>
+          <Plus size={16} /> Add income
+        </button>
+        <button className="btn bg-rose-600 text-white hover:bg-rose-700" onClick={() => open({ kind: 'tx', txType: 'expense' })}>
+          <Plus size={16} /> Add expense
+        </button>
+        <Link to="/import" className="btn-secondary">
+          <FileUp size={16} /> Import data
+        </Link>
+        <button
+          className="btn-ghost"
+          disabled={saving}
+          onClick={async () => {
+            if (await confirm({ title: 'Load demo data?', message: 'Adds realistic sample transactions and loans so you can try the app. You can erase it later in Settings → Data.', confirmLabel: 'Load demo data' }))
+              run(loadSample, 'Demo data loaded');
+          }}
+        >
+          <Sparkles size={16} /> Try demo data
+        </button>
+      </div>
+    </section>
+  );
+}
 
 function greeting() {
   const h = new Date().getHours();
@@ -44,7 +80,7 @@ export default function Dashboard() {
   const data = useMemo(() => {
     const liveTx = live(txs);
     const liveLoans = live(loans);
-    const overall = overallBalance(liveTx, liveLoans, today);
+    const overall = personalBalance(liveTx, today);
     const month = txTotals(liveTx, startOfMonth(today), endOfMonth(today));
     const pf = portfolio(liveLoans, today);
     const months = trailingPeriods('monthly', today, 6);
@@ -88,7 +124,7 @@ export default function Dashboard() {
               <Wallet size={16} /> Current balance
             </div>
             <div className="num mt-1 text-4xl font-extrabold tracking-tight sm:text-5xl">{formatINR(overall.balance)}</div>
-            <p className="mt-1 text-xs text-white/70">Income − expenses − money lent + repayments received</p>
+            <p className="mt-1 text-xs text-white/70">Personal income − expenses · loans are tracked separately</p>
             <div className="mt-5 grid max-w-md grid-cols-2 gap-3">
               <div className="rounded-2xl bg-white/10 p-3 backdrop-blur">
                 <div className="flex items-center gap-1.5 text-xs text-white/80">
@@ -127,16 +163,24 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Key stats */}
-      <section className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatCard label="This month's income" value={month.income} icon={ArrowDownLeft} tone="income" hint={formatMonth(today)} />
-        <StatCard label="This month's expenses" value={month.expense} icon={ArrowUpRight} tone="expense" hint={`Net ${formatINR(month.net)}`} />
-        <StatCard label="Total money lent" value={pf.totalLent} icon={HandCoins} tone="loan" hint={`${pf.counts.total} loans`} />
-        <StatCard label="Loan outstanding" value={pf.outstanding} icon={Hourglass} tone="loan" hint={`Principal ${formatINR(pf.outstandingPrincipal)}`} />
-        <StatCard label="Interest earned" value={pf.interestEarned} icon={Percent} tone="interest" hint="Received so far" />
-        <StatCard label="Interest pending" value={pf.interestPending} icon={Clock} tone="warning" hint="Accrued until today" />
-        <StatCard label="Total income" value={overall.income} icon={TrendingUp} tone="income" hint="All time" />
-        <StatCard label="Total expenses" value={overall.expense} icon={TrendingDown} tone="expense" hint="All time" />
+      {txs.length === 0 && loans.length === 0 && <GettingStarted />}
+
+      {/* Personal vs lending — never mixed */}
+      <section className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+        <StatCard label="Personal expenses (this month)" value={month.expense} icon={ArrowUpRight} tone="expense" hint={`All time ${formatINR(overall.expense)}`} />
+        <StatCard label="Money lent (total)" value={pf.totalLent} icon={HandCoins} tone="loan" hint={`${pf.counts.total} loans · not counted as expense`} />
+        <StatCard label="Outstanding loans" value={pf.outstanding} icon={Hourglass} tone="loan" hint={`Principal ${formatINR(pf.outstandingPrincipal)} + interest ${formatINR(pf.interestPending)}`} />
+      </section>
+
+      {/* Personal finance */}
+      <section>
+        <SectionTitle title="Personal finance" subtitle="Your income and daily expenses" action={<Link to="/transactions" className="text-xs font-semibold text-brand-600 dark:text-brand-300">Transactions →</Link>} />
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <StatCard label="This month's income" value={month.income} icon={ArrowDownLeft} tone="income" hint={formatMonth(today)} />
+          <StatCard label="This month's expenses" value={month.expense} icon={ArrowUpRight} tone="expense" hint={`Saved ${formatINR(month.net)}`} />
+          <StatCard label="Total income" value={overall.income} icon={TrendingUp} tone="income" hint="All time" />
+          <StatCard label="Total expenses" value={overall.expense} icon={TrendingDown} tone="expense" hint="All time" />
+        </div>
       </section>
 
       {/* Charts */}
@@ -153,7 +197,7 @@ export default function Dashboard() {
 
       {/* Loan summary */}
       <section>
-        <SectionTitle title="Loan summary" action={<Link to="/loans" className="text-xs font-semibold text-brand-600 dark:text-brand-300">All loans →</Link>} />
+        <SectionTitle title="Lending summary" subtitle="Money lent to people — kept separate from your income & expenses" action={<Link to="/loans" className="text-xs font-semibold text-brand-600 dark:text-brand-300">Loans →</Link>} />
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <StatCard label="💰 Total Lent" value={pf.totalLent} icon={Landmark} tone="loan" />
           <StatCard label="💵 Total Repaid" value={pf.totalRepaid} icon={CheckCircle2} tone="income" />

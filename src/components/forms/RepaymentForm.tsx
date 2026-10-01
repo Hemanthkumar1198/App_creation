@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Trash2 } from 'lucide-react';
+import { Loader2, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Field, Row } from '../ui/common';
@@ -10,6 +10,7 @@ import { formatINR } from '../../lib/format';
 import { suggestRepaymentSplit } from '../../lib/loans';
 import { useStore } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
+import { useSave } from '../../lib/useSave';
 import type { PaymentMethod } from '../../types';
 
 export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; editId?: string; onClose: () => void }) {
@@ -18,7 +19,8 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
   const addRepayment = useStore((s) => s.addRepayment);
   const updateRepayment = useStore((s) => s.updateRepayment);
   const deleteRepayment = useStore((s) => s.deleteRepayment);
-  const { toast, confirm } = useUI();
+  const confirm = useUI((s) => s.confirm);
+  const { saving, run } = useSave();
   const existing = loan?.repayments.find((r) => r.id === editId);
 
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '');
@@ -37,34 +39,31 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
   const pPortion = auto ? due.principalPortion : round2(parseFloat(principalPortion) || 0);
   const iPortion = auto ? due.interestPortion : round2(parseFloat(interestPortion) || 0);
 
-  const save = () => {
+  const save = async () => {
     if (!(value > 0)) return setError('Enter the amount received');
     if (date < loan.startDate) return setError(`Date cannot be before the loan start (${formatDate(loan.startDate)})`);
+    if (value > due.outstanding + 0.009) return setError(`Repayment cannot exceed the outstanding amount of ${formatINR(due.outstanding, { paise: true })}`);
+    if (pPortion < 0 || iPortion < 0) return setError('Portions cannot be negative');
+    if (pPortion > due.principalDue + 0.009) return setError(`Principal portion cannot exceed ${formatINR(due.principalDue, { paise: true })}`);
     if (Math.abs(round2(pPortion + iPortion) - value) > 0.009) return setError(`Principal + interest must equal ${formatINR(value, { paise: true })}`);
     const payload = { amount: value, date, paymentMethod: method, principalPortion: pPortion, interestPortion: iPortion, notes: notes.trim() };
-    if (existing) {
-      updateRepayment(loan.id, existing.id, payload);
-      toast('Repayment updated');
-    } else {
-      addRepayment(loan.id, payload);
-      toast(`Repayment of ${formatINR(value)} recorded`);
-    }
-    onClose();
+    const ok = existing
+      ? await run(() => updateRepayment(loan.id, existing.id, payload), 'Repayment updated')
+      : await run(() => addRepayment(loan.id, payload), `Repayment of ${formatINR(value)} recorded`);
+    if (ok) onClose();
   };
 
   const del = async () => {
     if (!existing) return;
     const ok = await confirm({ title: 'Delete this repayment?', message: `${formatINR(existing.amount)} received on ${formatDate(existing.date)} will be removed and balances recalculated.`, confirmLabel: 'Delete', danger: true });
     if (!ok) return;
-    deleteRepayment(loan.id, existing.id);
-    onClose();
-    toast('Repayment deleted', { tone: 'danger' });
+    if (await run(() => deleteRepayment(loan.id, existing.id), 'Repayment deleted')) onClose();
   };
 
   return (
     <Sheet
       title={existing ? 'Edit repayment' : 'Add repayment'}
-      subtitle={`From ${loan.borrowerName}`}
+      subtitle={`From ${loan.borrowerName} · recorded under Loans, not as income`}
       onClose={onClose}
       footer={
         <div className="flex gap-2">
@@ -76,8 +75,9 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
           <button className="btn-secondary flex-1" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn flex-1 bg-emerald-600 text-white hover:bg-emerald-700" onClick={save}>
-            {existing ? 'Save changes' : 'Record repayment'}
+          <button className="btn flex-1 bg-emerald-600 text-white hover:bg-emerald-700" onClick={save} disabled={saving}>
+            {saving && <Loader2 size={16} className="animate-spin" />}
+            {saving ? 'Saving…' : existing ? 'Save changes' : 'Record repayment'}
           </button>
         </div>
       }
@@ -121,7 +121,7 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
               </button>
             )}
           </div>
-          {value > due.outstanding + 0.009 && due.outstanding > 0 && <p className="mt-1.5 text-xs font-medium text-amber-600">This is more than the outstanding balance.</p>}
+          {value > due.outstanding + 0.009 && <p className="mt-1.5 text-xs font-medium text-rose-600">More than the outstanding balance of {formatINR(due.outstanding, { paise: true })}.</p>}
         </div>
 
         <div className="grid grid-cols-2 gap-3">

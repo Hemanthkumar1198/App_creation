@@ -99,10 +99,9 @@ export function periodReport(txs: Transaction[], loans: Loan[], p: Period, today
     ...t,
     savings: t.net,
     ...la,
+    investments: investmentTotal(txs, p.start, p.end),
     outstanding: pf.outstanding,
     interestPending: pf.interestPending,
-    /** Cash flow = income − expenses − money lent + repayments received */
-    cashFlow: round2(t.net - la.lent + la.repaid),
   };
 }
 
@@ -118,9 +117,17 @@ export function categoryBreakdown(txs: Transaction[], type: TxType, start: strin
     .sort((a, b) => b.amount - a.amount);
 }
 
-/** Overall balance: income − expenses − money lent out + repayments received. */
-export function overallBalance(txs: Transaction[], loans: Loan[], asOf = '9999-12-31') {
+/** Money moved into investments (expense transactions in the Investment category). */
+export function investmentTotal(txs: Transaction[], start: string, end: string) {
+  return round2(txs.filter((t) => !t.deletedAt && t.type === 'expense' && t.category === 'Investment' && inRange(t.date, start, end)).reduce((a, t) => a + t.amount, 0));
+}
+
+/**
+ * Personal balance = income − expenses. Loans are deliberately NOT part of this:
+ * money lent is not an expense and repayments are not income — they are tracked
+ * in the separate Loans module.
+ */
+export function personalBalance(txs: Transaction[], asOf = '9999-12-31') {
   const t = txTotals(txs, '0000-01-01', asOf);
-  const la = loanActivity(loans, '0000-01-01', asOf);
-  return { ...t, ...la, balance: round2(t.net - la.lent + la.repaid) };
+  return { ...t, balance: t.net };
 }

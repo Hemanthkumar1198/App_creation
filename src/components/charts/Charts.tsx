@@ -115,7 +115,7 @@ export function TrendArea({ data, series, name, height = 220 }: { data: { label:
 }
 
 /** Net cash flow: bars above zero in income green, below in expense red. */
-export function CashFlowChart({ data, height = 240 }: { data: { label: string; value: number }[]; height?: number }) {
+export function CashFlowChart({ data, height = 240, name = "Net savings" }: { data: { label: string; value: number }[]; height?: number; name?: string }) {
   const { pick, axis } = useColors();
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -125,7 +125,7 @@ export function CashFlowChart({ data, height = 240 }: { data: { label: string; v
         <YAxis {...axisProps(axis)} tickFormatter={formatINRCompact} width={56} />
         <ReferenceLine y={0} stroke={axis} />
         <Tooltip content={<ChartTooltip />} />
-        <Bar dataKey="value" name="Net cash flow" radius={[4, 4, 4, 4]} maxBarSize={28}>
+        <Bar dataKey="value" name={name} radius={[4, 4, 4, 4]} maxBarSize={28}>
           {data.map((d, i) => (
             <Cell key={i} fill={d.value >= 0 ? pick('income') : pick('expense')} />
           ))}

@@ -17,10 +17,18 @@ import {
   Clock,
   CalendarClock,
   PieChart,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  HardDrive,
+  FileUp,
+  ShieldCheck,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useStore } from '../store/useStore';
+import { useTheme } from '../store/useTheme';
+import { useSession } from '../store/useSession';
 import { useUI } from '../store/useUI';
 import { buildReminders, type Reminder } from '../lib/reminders';
 import { todayISO } from '../lib/dates';
@@ -34,7 +42,7 @@ const NAV = [
 ];
 
 export function useIsDark() {
-  const theme = useStore((s) => s.settings.theme);
+  const theme = useTheme((s) => s.theme);
   const [sys, setSys] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -50,8 +58,8 @@ function Logo() {
     <div className="flex items-center gap-2.5">
       <img src="./icon.svg" alt="" className="h-9 w-9 rounded-xl shadow-glow" />
       <div className="leading-tight">
-        <div className="text-[15px] font-extrabold tracking-tight">Paisa Ledger</div>
-        <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Money & loans</div>
+        <div className="whitespace-nowrap text-[15px] font-extrabold tracking-tight">Paisa Ledger</div>
+        <div className="hidden text-[11px] font-medium text-slate-500 dark:text-slate-400 sm:block">Money & loans</div>
       </div>
     </div>
   );
@@ -154,15 +162,72 @@ function Notifications() {
 
 function ThemeToggle() {
   const dark = useIsDark();
-  const update = useStore((s) => s.updateSettings);
+  const setTheme = useTheme((s) => s.setTheme);
   return (
     <button
       className="rounded-full p-2.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
-      onClick={() => update({ theme: dark ? 'light' : 'dark' })}
+      onClick={() => setTheme(dark ? 'light' : 'dark')}
       aria-label="Toggle theme"
     >
       {dark ? <Sun size={20} /> : <Moon size={20} />}
     </button>
+  );
+}
+
+/** Shows whether everything is saved to the cloud, still syncing, or offline. */
+function SyncStatus() {
+  const mode = useStore((s) => s.mode);
+  const pending = useStore((s) => s.pendingSync);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+  if (mode === 'local')
+    return (
+      <span className="hidden items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 sm:inline-flex" title="Data is stored only in this browser">
+        <HardDrive size={12} /> This device only
+      </span>
+    );
+  const [Icon, label, cls] = !online
+    ? [CloudOff, pending ? 'Offline · will sync' : 'Offline', 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300']
+    : pending
+      ? [RefreshCw, 'Saving…', 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300']
+      : [Cloud, 'Saved', 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'];
+  return (
+    <span className={clsx('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold', cls)} title={online ? 'All changes are saved to your account' : 'Changes are kept on this device and sync automatically'}>
+      <Icon size={12} className={pending && online ? 'animate-spin' : ''} /> <span className="hidden sm:inline">{label}</span>
+    </span>
+  );
+}
+
+function AccountButton() {
+  const user = useSession((s) => s.user);
+  if (!user) return null;
+  const initials = user.name.replace(/[^A-Za-z ]/g, '').split(' ').filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '₹';
+  return (
+    <NavLink to="/settings" className="ml-1 grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-brand-500 to-blue-500 text-xs font-bold text-white" title={user.name} aria-label="Account">
+      {user.photoURL ? <img src={user.photoURL} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : initials}
+    </NavLink>
+  );
+}
+
+function SyncErrorBanner() {
+  const err = useStore((s) => s.syncError);
+  if (!err) return null;
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+      <span>{err}</span>
+      <button className="btn-secondary py-1.5" onClick={() => window.location.reload()}>
+        <RefreshCw size={14} /> Retry
+      </button>
+    </div>
   );
 }
 
@@ -203,6 +268,18 @@ function Fab() {
   );
 }
 
+function SidebarCard() {
+  const mode = useStore((s) => s.mode);
+  return (
+    <div className="mt-auto rounded-2xl bg-gradient-to-br from-brand-600 to-blue-600 p-4 text-white">
+      <div className="flex items-center gap-1.5 text-sm font-bold">
+        <ShieldCheck size={15} /> {mode === 'cloud' ? 'Backed up to your account' : 'Stored on this device'}
+      </div>
+      <p className="mt-1 text-xs text-white/80">{mode === 'cloud' ? 'Available on all your devices, even offline.' : 'Export a backup regularly from Settings.'}</p>
+    </div>
+  );
+}
+
 export function Layout({ children }: { children: ReactNode }) {
   const [mobileSearch, setMobileSearch] = useState(false);
   const loc = useLocation();
@@ -233,10 +310,15 @@ export function Layout({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto rounded-2xl bg-gradient-to-br from-brand-600 to-blue-600 p-4 text-white">
-          <div className="text-sm font-bold">Your data stays on this device</div>
-          <p className="mt-1 text-xs text-white/80">Export a backup regularly from Settings.</p>
-        </div>
+        <NavLink
+          to="/import"
+          className={({ isActive }) =>
+            clsx('mt-1 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition', isActive ? 'bg-slate-100 text-brand-700 dark:bg-white/10 dark:text-brand-200' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5')
+          }
+        >
+          <FileUp size={18} /> Import data
+        </NavLink>
+        <SidebarCard />
       </aside>
 
       {/* Top bar */}
@@ -250,8 +332,10 @@ export function Layout({ children }: { children: ReactNode }) {
             <button className="rounded-full p-2.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10 md:hidden" onClick={() => setMobileSearch(true)} aria-label="Search">
               <Search size={20} />
             </button>
+            <SyncStatus />
             <Notifications />
             <ThemeToggle />
+            <AccountButton />
           </div>
         </div>
         {mobileSearch && (
@@ -264,7 +348,10 @@ export function Layout({ children }: { children: ReactNode }) {
         )}
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 pb-32 pt-5 sm:px-6 lg:pb-12">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 pb-32 pt-5 sm:px-6 lg:pb-12">
+        <SyncErrorBanner />
+        {children}
+      </main>
 
       <Fab />
 

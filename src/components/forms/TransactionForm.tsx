@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { ChevronDown, Minus, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, Loader2, Minus, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Field } from '../ui/common';
@@ -9,6 +9,7 @@ import { round2 } from '../../lib/finance';
 import { formatINR } from '../../lib/format';
 import { useStore } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
+import { useSave } from '../../lib/useSave';
 import type { PaymentMethod, TxType } from '../../types';
 
 export function TransactionForm({ txType, editId, onClose }: { txType: TxType; editId?: string; onClose: () => void }) {
@@ -18,7 +19,8 @@ export function TransactionForm({ txType, editId, onClose }: { txType: TxType; e
   const update = useStore((s) => s.updateTransaction);
   const remove = useStore((s) => s.deleteTransaction);
   const restore = useStore((s) => s.restoreTransaction);
-  const { toast, confirm } = useUI();
+  const confirm = useUI((s) => s.confirm);
+  const { saving, run } = useSave();
 
   const [type, setType] = useState<TxType>(existing?.type ?? txType);
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '');
@@ -40,20 +42,19 @@ export function TransactionForm({ txType, editId, onClose }: { txType: TxType; e
     if (!categoriesFor(t).some((c) => c.name === category)) setCategory(t === 'income' ? 'Salary' : 'Food');
   };
 
-  const save = (addAnother = false) => {
+  const save = async (addAnother = false) => {
     if (!(value > 0)) {
       setError('Enter an amount greater than ₹0');
       amountRef.current?.focus();
       return;
     }
+    if (value > 1e11) return setError('Amount is too large');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setError('Choose a valid date');
     const payload = { type, amount: value, date, category, description: description.trim() || category, paymentMethod: method, notes: notes.trim() };
-    if (existing) {
-      update(existing.id, payload);
-      toast('Transaction updated');
-    } else {
-      add(payload);
-      toast(`${isIncome ? 'Cash in' : 'Cash out'} of ${formatINR(value)} saved`);
-    }
+    const ok = existing
+      ? await run(() => update(existing.id, payload), 'Transaction updated')
+      : await run(() => add(payload), `${isIncome ? 'Cash in' : 'Cash out'} of ${formatINR(value)} saved`);
+    if (!ok) return;
     if (addAnother) {
       setAmount('');
       setDescription('');
@@ -67,9 +68,7 @@ export function TransactionForm({ txType, editId, onClose }: { txType: TxType; e
     if (!existing) return;
     const ok = await confirm({ title: 'Delete this transaction?', message: `${existing.category} · ${formatINR(existing.amount)} will be moved to trash. You can restore it from Settings → Trash.`, confirmLabel: 'Delete', danger: true });
     if (!ok) return;
-    remove(existing.id);
-    onClose();
-    toast('Transaction deleted', { tone: 'danger', action: { label: 'Undo', run: () => restore(existing.id) } });
+    if (await run(() => remove(existing.id), 'Transaction moved to trash', { undo: () => void restore(existing.id) })) onClose();
   };
 
   return (
@@ -80,19 +79,21 @@ export function TransactionForm({ txType, editId, onClose }: { txType: TxType; e
       footer={
         <div className="flex gap-2">
           {existing ? (
-            <button className="btn-secondary text-rose-600 dark:text-rose-400" onClick={del} aria-label="Delete">
+            <button className="btn-secondary text-rose-600 dark:text-rose-400" onClick={del} disabled={saving} aria-label="Delete">
               <Trash2 size={16} />
             </button>
           ) : (
-            <button className="btn-secondary flex-1" onClick={() => save(true)}>
+            <button className="btn-secondary flex-1" disabled={saving} onClick={() => save(true)}>
               Save &amp; add another
             </button>
           )}
           <button
             className={clsx('btn flex-1 text-white', isIncome ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700')}
+            disabled={saving}
             onClick={() => save(false)}
           >
-            {existing ? 'Save changes' : 'Save'}
+            {saving && <Loader2 size={16} className="animate-spin" />}
+            {saving ? 'Saving…' : existing ? 'Save changes' : 'Save'}
           </button>
         </div>
       }

@@ -296,7 +296,7 @@ export function portfolio(loans: Loan[], asOf: string = todayISO()): PortfolioSu
 export const STATUS_LABEL: Record<LoanStatus, string> = {
   active: 'Active',
   'partially-paid': 'Partially Paid',
-  'fully-paid': 'Fully Paid',
+  'fully-paid': 'Fully Repaid',
   overdue: 'Overdue',
 };
 

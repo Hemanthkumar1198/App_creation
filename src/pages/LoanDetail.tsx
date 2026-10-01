@@ -19,6 +19,7 @@ import { formatINR } from '../lib/format';
 import { computeLoan, describeRate } from '../lib/loans';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
+import { useSave } from '../lib/useSave';
 
 const FREQ_LABEL = { 'one-time': 'One-time', monthly: 'Monthly', quarterly: 'Quarterly', 'half-yearly': 'Half-yearly', yearly: 'Yearly' };
 
@@ -29,7 +30,8 @@ export default function LoanDetail() {
   const reopenLoan = useStore((s) => s.reopenLoan);
   const deleteLoan = useStore((s) => s.deleteLoan);
   const restoreLoan = useStore((s) => s.restoreLoan);
-  const { open, confirm, toast } = useUI();
+  const { open, confirm } = useUI();
+  const { saving, run } = useSave();
   const navigate = useNavigate();
   const today = todayISO();
   const s = useMemo(() => (loan ? computeLoan(loan, today) : null), [loan, today]);
@@ -56,9 +58,7 @@ export default function LoanDetail() {
   const del = async () => {
     const ok = await confirm({ title: `Delete loan to ${loan.borrowerName}?`, message: 'The loan and its repayment history will be moved to trash. You can restore it from Settings → Trash.', confirmLabel: 'Delete loan', danger: true });
     if (!ok) return;
-    deleteLoan(loan.id);
-    navigate('/loans');
-    toast('Loan deleted', { tone: 'danger', action: { label: 'Undo', run: () => restoreLoan(loan.id) } });
+    if (await run(() => deleteLoan(loan.id), 'Loan moved to trash', { undo: () => void restoreLoan(loan.id) })) navigate('/loans');
   };
 
   return (
@@ -130,17 +130,14 @@ export default function LoanDetail() {
               <button
                 className="btn bg-white/15 text-white backdrop-blur hover:bg-white/25"
                 onClick={async () => {
-                  if (await confirm({ title: 'Reopen this loan?', message: 'The loan will become active again and interest will resume accruing.', confirmLabel: 'Reopen' })) {
-                    reopenLoan(loan.id);
-                    toast('Loan reopened');
-                  }
+                  if (await confirm({ title: 'Reopen this loan?', message: 'The loan will become active again and interest will resume accruing.', confirmLabel: 'Reopen' })) run(() => reopenLoan(loan.id), 'Loan reopened');
                 }}
               >
                 <RotateCcw size={16} /> Reopen
               </button>
             ) : (
               <button className="btn bg-white/15 text-white backdrop-blur hover:bg-white/25" onClick={() => open({ kind: 'close-loan', loanId: loan.id })}>
-                <CheckCircle2 size={16} /> Mark as Paid
+                <CheckCircle2 size={16} /> Mark as Fully Repaid
               </button>
             )}
             {!closed && (
@@ -174,10 +171,11 @@ export default function LoanDetail() {
                 className="input"
                 min={loan.startDate}
                 value={loan.interestEndDate ?? ''}
-                onChange={(e) => updateLoan(loan.id, { interestEndDate: e.target.value || undefined })}
+                disabled={saving}
+                onChange={(e) => run(() => updateLoan(loan.id, { interestEndDate: e.target.value || undefined }), 'Interest end date saved')}
               />
               {loan.interestEndDate && (
-                <button className="btn-ghost" onClick={() => updateLoan(loan.id, { interestEndDate: undefined })}>
+                <button className="btn-ghost" disabled={saving} onClick={() => run(() => updateLoan(loan.id, { interestEndDate: undefined }), 'Interest now accrues until today')}>
                   Today
                 </button>
               )}
