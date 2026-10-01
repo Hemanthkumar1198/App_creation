@@ -15,15 +15,18 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 
+import { builtInFirebaseConfig } from '../firebase-config';
+
 const env = import.meta.env;
 
+const b = builtInFirebaseConfig;
 export const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY as string | undefined,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
-  projectId: env.VITE_FIREBASE_PROJECT_ID as string | undefined,
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined,
-  appId: env.VITE_FIREBASE_APP_ID as string | undefined,
+  apiKey: (env.VITE_FIREBASE_API_KEY as string | undefined) || b.apiKey,
+  authDomain: (env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined) || b.authDomain,
+  projectId: (env.VITE_FIREBASE_PROJECT_ID as string | undefined) || b.projectId,
+  storageBucket: (env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined) || b.storageBucket,
+  messagingSenderId: (env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined) || b.messagingSenderId,
+  appId: (env.VITE_FIREBASE_APP_ID as string | undefined) || b.appId,
 };
 
 export const cloudEnabled = !!(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
