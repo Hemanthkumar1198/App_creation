@@ -12,6 +12,8 @@ module**, so it never mixes with your daily income and expense calculations.
 
 Built with React + TypeScript + Vite, Tailwind CSS, Recharts, Zustand, Firebase, ExcelJS and pdf.js.
 
+> 📘 **Full implementation & setup guide:** [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)
+
 ## Quick start (developers)
 
 ```bash
