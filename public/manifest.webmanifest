@@ -1,0 +1,11 @@
+{
+  "name": "Paisa Ledger",
+  "short_name": "Paisa",
+  "description": "Personal finance, cashbook and loan manager",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b0b14",
+  "theme_color": "#6128f4",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
