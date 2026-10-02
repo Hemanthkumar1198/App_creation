@@ -131,10 +131,15 @@ function cleanRepayment(input: RepaymentInput): RepaymentInput {
 function assertWithinOutstanding(loan: Loan, r: RepaymentInput, excludeId?: string) {
   if (r.date < loan.startDate) throw new ValidationError('Repayment date cannot be before the loan start date');
   const due = suggestRepaymentSplit(loan, r.amount, r.date, excludeId);
-  if (r.amount > due.outstanding + 0.009)
-    throw new ValidationError(`Repayment exceeds the outstanding amount of ${formatINR(due.outstanding, { paise: true })} on that date`);
   if (r.principalPortion > due.principalDue + 0.009)
     throw new ValidationError(`Principal portion exceeds the remaining principal of ${formatINR(due.principalDue, { paise: true })}`);
+  // Interest may be paid in advance (up to 12 months), but never more than that.
+  if (r.interestPortion > due.maxInterest + 0.009)
+    throw new ValidationError(
+      r.principalPortion > 0
+        ? `Repayment exceeds the outstanding amount of ${formatINR(due.outstanding, { paise: true })} on that date`
+        : `Interest is more than what's due (${formatINR(due.interestDue, { paise: true })}) plus 12 months in advance`,
+    );
 }
 
 export const useStore = create<State>()((_set, get) => {

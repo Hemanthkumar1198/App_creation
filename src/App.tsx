@@ -5,6 +5,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout, useIsDark, useReminders } from './components/Layout';
 import { CloseLoanForm, ReminderSheet } from './components/forms/LoanActions';
 import { LoanForm } from './components/forms/LoanForm';
+import { InterestForm } from './components/forms/InterestForm';
 import { RepaymentForm } from './components/forms/RepaymentForm';
 import { TransactionForm } from './components/forms/TransactionForm';
 import { ConfirmHost, Toaster } from './components/ui/Overlays';
@@ -23,6 +24,7 @@ const Reports = lazyPage(() => import('./pages/Reports'));
 const Search = lazyPage(() => import('./pages/Search'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const ImportData = lazyPage(() => import('./pages/Import'));
+const MonthBook = lazyPage(() => import('./pages/MonthBook'));
 
 function SheetHost() {
   const sheet = useUI((s) => s.sheet);
@@ -31,11 +33,13 @@ function SheetHost() {
   const body = (() => {
     switch (sheet.kind) {
       case 'tx':
-        return <TransactionForm key={sheet.editId ?? sheet.txType} txType={sheet.txType} editId={sheet.editId} onClose={close} />;
+        return <TransactionForm key={sheet.editId ?? sheet.txType} txType={sheet.txType} editId={sheet.editId} defaultDate={sheet.defaultDate} onClose={close} />;
       case 'loan':
         return <LoanForm key={sheet.editId ?? 'new'} editId={sheet.editId} onClose={close} />;
       case 'repayment':
         return <RepaymentForm key={sheet.editId ?? 'new'} loanId={sheet.loanId} editId={sheet.editId} onClose={close} />;
+      case 'interest':
+        return <InterestForm loanId={sheet.loanId} onClose={close} />;
       case 'close-loan':
         return <CloseLoanForm loanId={sheet.loanId} onClose={close} />;
       case 'reminder':
@@ -157,6 +161,7 @@ function RoutedApp() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/transactions" element={<Transactions />} />
+            <Route path="/transactions/month/:ym" element={<MonthBook />} />
             <Route path="/loans" element={<Loans />} />
             <Route path="/loans/:id" element={<LoanDetail />} />
             <Route path="/reports" element={<Reports />} />

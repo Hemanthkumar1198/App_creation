@@ -3,9 +3,10 @@ import type { TxType } from '../types';
 import { uid } from '../lib/format';
 
 export type SheetState =
-  | { kind: 'tx'; txType: TxType; editId?: string }
+  | { kind: 'tx'; txType: TxType; editId?: string; defaultDate?: string }
   | { kind: 'loan'; editId?: string }
   | { kind: 'repayment'; loanId: string; editId?: string }
+  | { kind: 'interest'; loanId: string }
   | { kind: 'close-loan'; loanId: string }
   | { kind: 'reminder'; loanId: string }
   | null;

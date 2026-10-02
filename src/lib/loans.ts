@@ -31,8 +31,27 @@ export interface TimelineRow {
   notes: string;
 }
 
+export interface InterestPayment {
+  id: string;
+  date: string;
+  amount: number;
+  /** Interest period this payment follows on from (previous interest payment or loan start). */
+  periodFrom: string;
+  paymentMethod: Repayment['paymentMethod'];
+  notes: string;
+}
+
 export interface LoanSummary {
   principal: number;
+  /** Every payment that included interest, oldest first. */
+  interestPayments: InterestPayment[];
+  lastInterestPayment: InterestPayment | null;
+  /** When the next interest instalment is expected (last interest payment + one interest period). */
+  nextInterestDueDate: string | null;
+  /** Interest for one period (month by default) on the current remaining principal. */
+  interestPerPeriod: number;
+  /** Months in one interest period (payment frequency, monthly for one-time loans). */
+  interestPeriodMonths: number;
   /** Interest for the full agreed term (start → due date). */
   expectedInterest: number;
   /** Principal + expected interest. */
@@ -221,8 +240,27 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
   const daysToDue = diffDays(asOf, nextDueDate ?? loan.dueDate);
   const dueSoon = !fullyPaid && status !== 'overdue' && daysToDue >= 0 && daysToDue <= 7;
 
+  // Interest-receipt tracking: each received interest amount starts the next interest period.
+  const periodMonths = FREQUENCY_MONTHS[loan.paymentFrequency] || 1;
+  const interestPayments: InterestPayment[] = [];
+  let prevInterestDate = start;
+  for (const r of reps) {
+    if (r.interestPortion <= 0) continue;
+    interestPayments.push({ id: r.id, date: r.date, amount: round2(r.interestPortion), periodFrom: prevInterestDate, paymentMethod: r.paymentMethod, notes: r.notes });
+    prevInterestDate = r.date;
+  }
+  const lastInterestPayment = interestPayments.length ? interestPayments[interestPayments.length - 1] : null;
+  const nextInterestDueDate =
+    fullyPaid || loan.interestType === 'fixed' || loan.interestRate <= 0 ? null : addMonths(lastInterestPayment?.date ?? start, periodMonths);
+  const interestPerPeriod = loan.interestType === 'fixed' ? 0 : round2(interestForMonthsRaw(remainingPrincipal, terms, periodMonths));
+
   return {
     principal: round2(loan.principal),
+    interestPayments,
+    lastInterestPayment,
+    nextInterestDueDate,
+    interestPerPeriod,
+    interestPeriodMonths: periodMonths,
     expectedInterest: expInterest,
     totalAmountDue,
     interestAccrued,
@@ -255,7 +293,15 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
 export function suggestRepaymentSplit(loan: Loan, amount: number, date: string, excludeRepaymentId?: string) {
   const others = { ...loan, closedAt: undefined, repayments: loan.repayments.filter((r) => r.id !== excludeRepaymentId) };
   const s = computeLoan(others, date);
-  return { ...splitRepayment(amount, s.remainingInterest), interestDue: s.remainingInterest, principalDue: s.remainingPrincipal, outstanding: s.totalOutstanding };
+  // Interest may be received in advance, up to 12 months ahead on the remaining principal.
+  const advanceInterestAllowed = loan.interestType === 'fixed' ? 0 : round2(interestForMonthsRaw(s.remainingPrincipal, loanTerms(loan), 12));
+  return {
+    ...splitRepayment(amount, s.remainingInterest),
+    interestDue: s.remainingInterest,
+    principalDue: s.remainingPrincipal,
+    outstanding: s.totalOutstanding,
+    maxInterest: round2(s.remainingInterest + advanceInterestAllowed),
+  };
 }
 
 export interface PortfolioSummary {

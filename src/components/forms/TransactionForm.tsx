@@ -12,7 +12,7 @@ import { useUI } from '../../store/useUI';
 import { useSave } from '../../lib/useSave';
 import type { PaymentMethod, TxType } from '../../types';
 
-export function TransactionForm({ txType, editId, onClose }: { txType: TxType; editId?: string; onClose: () => void }) {
+export function TransactionForm({ txType, editId, defaultDate, onClose }: { txType: TxType; editId?: string; defaultDate?: string; onClose: () => void }) {
   const existing = useStore((s) => (editId ? s.transactions.find((t) => t.id === editId) : undefined));
   const lastMethod = useStore((s) => s.settings.lastPaymentMethod);
   const add = useStore((s) => s.addTransaction);
@@ -24,7 +24,7 @@ export function TransactionForm({ txType, editId, onClose }: { txType: TxType; e
 
   const [type, setType] = useState<TxType>(existing?.type ?? txType);
   const [amount, setAmount] = useState(existing ? String(existing.amount) : '');
-  const [date, setDate] = useState(existing?.date ?? todayISO());
+  const [date, setDate] = useState(existing?.date ?? defaultDate ?? todayISO());
   const [category, setCategory] = useState(existing?.category ?? (txType === 'income' ? 'Salary' : 'Food'));
   const [description, setDescription] = useState(existing?.description ?? '');
   const [method, setMethod] = useState<PaymentMethod>(existing?.paymentMethod ?? lastMethod);

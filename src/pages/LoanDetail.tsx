@@ -10,6 +10,8 @@ import {
   Plus,
   RotateCcw,
   Trash2,
+  Percent,
+  UserPlus,
 } from 'lucide-react';
 import { useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -63,9 +65,14 @@ export default function LoanDetail() {
 
   return (
     <div className="space-y-5">
-      <Link to="/loans" className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white">
-        <ArrowLeft size={16} /> Loans
-      </Link>
+      <div className="flex items-center justify-between gap-2">
+        <Link to="/loans" className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white">
+          <ArrowLeft size={16} /> All loans
+        </Link>
+        <button className="btn-primary py-2" onClick={() => open({ kind: 'loan' })}>
+          <UserPlus size={16} /> New loan (another person)
+        </button>
+      </div>
 
       {/* Header */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-700 via-brand-600 to-blue-600 p-5 text-white shadow-glow sm:p-7">
@@ -118,6 +125,11 @@ export default function LoanDetail() {
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            {!closed && loan.interestType !== 'fixed' && loan.interestRate > 0 && (
+              <button className="btn bg-white text-sky-700 hover:bg-white/90" onClick={() => open({ kind: 'interest', loanId: loan.id })}>
+                <Percent size={16} /> Receive Interest
+              </button>
+            )}
             {!closed && (
               <button className="btn bg-white text-brand-700 hover:bg-white/90" onClick={() => open({ kind: 'repayment', loanId: loan.id })}>
                 <Plus size={16} /> Add Repayment
@@ -214,6 +226,76 @@ export default function LoanDetail() {
           {loan.notes && <p className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-white/5 dark:text-slate-300">{loan.notes}</p>}
         </section>
       </div>
+
+      {/* Interest received */}
+      {loan.interestType !== 'fixed' && loan.interestRate > 0 && (
+        <section className="card overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4 sm:px-5">
+            <div>
+              <h2 className="text-base font-bold">Interest received</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Each payment starts the next interest period</p>
+            </div>
+            {!closed && (
+              <button className="btn bg-sky-600 py-2 text-white hover:bg-sky-700" onClick={() => open({ kind: 'interest', loanId: loan.id })}>
+                <Plus size={15} /> Receive interest
+              </button>
+            )}
+          </div>
+          <div className="mt-3 grid gap-3 px-4 sm:grid-cols-3 sm:px-5">
+            <div className="rounded-2xl bg-slate-50 p-3 dark:bg-white/5">
+              <div className="text-xs text-slate-500 dark:text-slate-400">Last received</div>
+              <div className="num mt-0.5 font-bold">{s.lastInterestPayment ? formatINR(s.lastInterestPayment.amount, { paise: true }) : '—'}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">{s.lastInterestPayment ? formatDate(s.lastInterestPayment.date) : 'No interest received yet'}</div>
+            </div>
+            <div className="rounded-2xl bg-slate-50 p-3 dark:bg-white/5">
+              <div className="text-xs text-slate-500 dark:text-slate-400">Next interest due</div>
+              <div className={clsx('mt-0.5 font-bold', s.nextInterestDueDate && s.nextInterestDueDate < today ? 'text-rose-600 dark:text-rose-400' : '')}>
+                {s.nextInterestDueDate ? formatDate(s.nextInterestDueDate) : '—'}
+              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {s.nextInterestDueDate ? `${relativeDays(s.nextInterestDueDate, today)} · ~${formatINR(s.interestPerPeriod)} per ${s.interestPeriodMonths === 1 ? 'month' : `${s.interestPeriodMonths} months`}` : ''}
+              </div>
+            </div>
+            <div className="rounded-2xl bg-sky-50 p-3 dark:bg-sky-500/10">
+              <div className="text-xs text-slate-500 dark:text-slate-400">Interest due now</div>
+              <div className="num mt-0.5 font-bold text-sky-700 dark:text-sky-300">{formatINR(s.remainingInterest, { paise: true })}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Total received {formatINR(s.interestRepaid)}</div>
+            </div>
+          </div>
+          {s.interestPayments.length > 0 ? (
+            <div className="mt-3 overflow-x-auto">
+              <table className="num w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-y border-slate-100 bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-white/5 dark:bg-white/[0.02] dark:text-slate-400">
+                    <th className="px-4 py-2.5 sm:px-5">Received on</th>
+                    <th className="px-3 py-2.5">For period</th>
+                    <th className="px-3 py-2.5 text-right">Interest</th>
+                    <th className="px-4 py-2.5 sm:px-5">Method · notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50 dark:divide-white/[0.03]">
+                  {[...s.interestPayments].reverse().map((p) => (
+                    <tr key={p.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => open({ kind: 'repayment', loanId: loan.id, editId: p.id })}>
+                      <td className="px-4 py-2.5 font-medium sm:px-5">{formatDate(p.date)}</td>
+                      <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400">
+                        {formatDate(p.periodFrom)} → {formatDate(p.date)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-semibold text-sky-600 dark:text-sky-300">{formatINR(p.amount, { paise: true })}</td>
+                      <td className="px-4 py-2.5 text-slate-500 dark:text-slate-400 sm:px-5">
+                        {p.paymentMethod}
+                        {p.notes ? ` · ${p.notes}` : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="px-5 py-5 text-sm text-slate-500">No interest received yet. Tap “Receive interest” when {loan.borrowerName.split(' ')[0]} pays.</p>
+          )}
+          <div className="h-3" />
+        </section>
+      )}
 
       {/* Timeline */}
       <section className="card overflow-hidden">

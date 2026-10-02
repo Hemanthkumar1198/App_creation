@@ -188,4 +188,25 @@ describe('loan engine', () => {
     expect(p.interestPending).toBe(1000);
     expect(p.outstanding).toBe(151000);
   });
+
+  it('tracks interest received and the next interest due date from the last payment', () => {
+    // ₹50,000 @ 2%/m one-time loan: interest periods are monthly; ₹1,000 received on 01 Nov and 05 Dec.
+    const l = loan({ repayments: [rep('2026-11-01', 1000, 0, 1000, 'a'), rep('2026-12-05', 1000, 0, 1000, 'b')] });
+    const s = computeLoan(l, '2026-12-10');
+    expect(s.interestPayments.map((p) => [p.periodFrom, p.date, p.amount])).toEqual([
+      ['2026-10-01', '2026-11-01', 1000],
+      ['2026-11-01', '2026-12-05', 1000],
+    ]);
+    expect(s.lastInterestPayment?.date).toBe('2026-12-05');
+    expect(s.nextInterestDueDate).toBe('2027-01-05');
+    expect(s.interestPerPeriod).toBe(1000);
+    expect(computeLoan(loan(), '2026-10-15').nextInterestDueDate).toBe('2026-11-01');
+  });
+
+  it('allows interest in advance (up to 12 months) but not principal beyond what is owed', () => {
+    const sp = suggestRepaymentSplit(loan(), 0, '2026-11-01');
+    expect(sp.interestDue).toBe(1000);
+    expect(sp.maxInterest).toBe(13000); // 1,000 due + 12 × 1,000 in advance
+  });
 });
+

@@ -1,11 +1,11 @@
 import clsx from 'clsx';
-import { ArrowDownLeft, ArrowUpRight, Download, FileUp, Filter, ReceiptText, Scale, Search, X } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, BookOpen, ChevronRight, Download, FileUp, Filter, ReceiptText, Scale, Search, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { TransactionRow } from '../components/Rows';
 import { EmptyState, PageHeader, Segmented, StatCard } from '../components/ui/common';
 import { CATEGORIES, PAYMENT_METHODS } from '../lib/categories';
-import { formatDate, formatMonth } from '../lib/dates';
+import { formatDate, formatMonth, todayISO } from '../lib/dates';
 import { downloadCSV, transactionsRows } from '../lib/export';
 import { round2 } from '../lib/finance';
 import { formatINR } from '../lib/format';
@@ -16,10 +16,68 @@ import type { TxType } from '../types';
 
 type Sort = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
 
+/** Cashbook-style list: one "book" per month with totals; tap to open the month's details. */
+function MonthList() {
+  const all = useStore((s) => s.transactions);
+  const open = useUI((s) => s.open);
+  const months = useMemo(() => {
+    const map = new Map<string, { spent: number; income: number; count: number; updated: string }>();
+    map.set(todayISO().slice(0, 7), { spent: 0, income: 0, count: 0, updated: '' });
+    for (const t of live(all)) {
+      const k = t.date.slice(0, 7);
+      const m = map.get(k) ?? { spent: 0, income: 0, count: 0, updated: '' };
+      if (t.type === 'expense') m.spent += t.amount;
+      else m.income += t.amount;
+      m.count++;
+      const u = (t.updatedAt || t.createdAt || t.date).slice(0, 10);
+      if (u > m.updated) m.updated = u;
+      map.set(k, m);
+    }
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [all]);
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-white/5">
+        <span className="font-bold">Your books</span>
+        <span className="text-xs text-slate-500 dark:text-slate-400">{months.length} months</span>
+      </div>
+      <div className="divide-y divide-slate-100 dark:divide-white/5">
+        {months.map(([ym, m]) => (
+          <Link key={ym} to={`/transactions/month/${ym}`} className="flex items-center gap-3 px-4 py-3.5 transition hover:bg-slate-50 dark:hover:bg-white/5">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
+              <BookOpen size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-semibold">{formatMonth(ym)} expenses</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {m.count ? `${m.count} entries · updated ${formatDate(m.updated)}` : 'No entries yet'}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="num font-bold text-rose-600 dark:text-rose-400">−{formatINR(round2(m.spent))}</div>
+              {m.income > 0 && <div className="num text-xs font-semibold text-emerald-600 dark:text-emerald-400">+{formatINR(round2(m.income))}</div>}
+            </div>
+            <ChevronRight size={16} className="shrink-0 text-slate-400" />
+          </Link>
+        ))}
+      </div>
+      <div className="flex gap-2 border-t border-slate-100 p-3 dark:border-white/5">
+        <button className="btn flex-1 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => open({ kind: 'tx', txType: 'income' })}>
+          <ArrowDownLeft size={16} /> Cash In
+        </button>
+        <button className="btn flex-1 bg-rose-600 text-white hover:bg-rose-700" onClick={() => open({ kind: 'tx', txType: 'expense' })}>
+          <ArrowUpRight size={16} /> Cash Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Transactions() {
   const all = useStore((s) => s.transactions);
   const open = useUI((s) => s.open);
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [q, setQ] = useState('');
   const [type, setType] = useState<'all' | TxType>((params.get('type') as TxType) || 'all');
   const [category, setCategory] = useState(params.get('category') ?? '');
@@ -29,6 +87,8 @@ export default function Transactions() {
   const [to, setTo] = useState('');
   const [sort, setSort] = useState<Sort>('date-desc');
   const [showFilters, setShowFilters] = useState(false);
+  const view: 'months' | 'all' = params.get('view') === 'all' || params.get('type') || params.get('category') ? 'all' : 'months';
+  const setView = (v: 'months' | 'all') => setParams(v === 'all' ? { view: 'all' } : {}, { replace: true });
 
   const txs = useMemo(() => live(all), [all]);
   const months = useMemo(() => [...new Set(txs.map((t) => t.date.slice(0, 7)))].sort().reverse(), [txs]);
@@ -114,6 +174,20 @@ export default function Transactions() {
         }
       />
 
+      <Segmented
+        className="mb-4 w-full sm:w-auto"
+        value={view}
+        onChange={setView}
+        options={[
+          { value: 'months', label: <span className="flex items-center justify-center gap-1.5"><BookOpen size={14} /> Monthly books</span> },
+          { value: 'all', label: <span className="flex items-center justify-center gap-1.5"><ReceiptText size={14} /> All entries</span> },
+        ]}
+      />
+
+      {view === 'months' ? (
+        <MonthList />
+      ) : (
+      <>
       <div className="mb-4 grid grid-cols-3 gap-3">
         <StatCard compact label="Income" value={totals.income} icon={ArrowDownLeft} tone="income" />
         <StatCard compact label="Expenses" value={totals.expense} icon={ArrowUpRight} tone="expense" />
@@ -203,7 +277,9 @@ export default function Transactions() {
             <div key={g.key} className="card overflow-hidden">
               {g.key !== 'all' && (
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-white/5 dark:bg-white/[0.02]">
-                  <span className="font-bold">{formatMonth(g.key)}</span>
+                  <Link to={`/transactions/month/${g.key}`} className="flex items-center gap-1 font-bold hover:text-brand-600 dark:hover:text-brand-300">
+                    {formatMonth(g.key)} <ChevronRight size={14} />
+                  </Link>
                   <div className="num flex gap-3 text-xs font-semibold">
                     <span className="text-emerald-600 dark:text-emerald-400">+{formatINR(g.income)}</span>
                     <span className="text-rose-600 dark:text-rose-400">−{formatINR(g.expense)}</span>
@@ -219,6 +295,8 @@ export default function Transactions() {
             </div>
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   );

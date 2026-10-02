@@ -432,6 +432,10 @@ The **end date** is the earliest of: today, the manual *Interest calculation end
 
 **Loan dashboard (Loans page):** Total lent · Total repaid · Interest earned (and pending) · Outstanding · counts of Active / Overdue / Fully repaid · Upcoming due dates · filters (All, Active, Overdue, Due soon, Partially paid, Fully repaid) · search by borrower, phone or amount · sort by next due, outstanding, newest or name.
 
+**Interest received (per loan):** tap **Receive Interest** to note an interest-only payment (amount, date, method, notes). Each payment starts the next interest period, so the page shows **Last received**, **Next interest due** (last payment + one period: monthly by default, or the loan's payment frequency) and **Interest due now**, plus a history table: *Received on · For period (from → to) · Interest · Method/notes*. Interest can be received up to 12 months in advance. Overdue or upcoming interest also appears under the 🔔 bell.
+
+**All borrowers list:** the Loans page shows every person in one table: amount lent and rate, last interest received, next interest due, interest due, outstanding and status. Each row has **Interest**, **Repay** and **Edit** buttons. Switch to *Cards* if you prefer. **Add another person's loan** sits under the list and at the top of every loan page.
+
 **Loan details page:** borrower, phone (tap to call), principal, rate, dates, total interest, total due, amount paid, remaining, status, *Interest accrued until today* with the formula shown, a manual end-date picker, and the repayment timeline (**Date | Amount | Principal | Interest | Balance**). Buttons: **Add Repayment · Edit Loan · Mark as Fully Repaid · Send Reminder** (WhatsApp / SMS / Call / Copy, with the amount pre-filled).
 
 ---
@@ -442,7 +446,8 @@ The **end date** is the earliest of: today, the manual *Interest calculation end
 |---|---|
 | **Login** | Continue with Google · Continue with mobile number (OTP) |
 | **Dashboard** | Personal balance; big **+ Cash In / − Cash Out / Add Loan** buttons; personal vs lending cards; Income-vs-Expense and monthly expense charts; lending summary with status counts; upcoming due dates; recent transactions & repayments; spending by category; getting-started card for new accounts |
-| **Transactions** | Search; filter by type, category, payment method, month, date range; sort by date or amount; grouped by month with monthly totals; tap any row to edit or delete; Import and CSV export buttons |
+| **Monthly books** | Transactions opens on a cashbook-style list of months (e.g. *Sep 2026 expenses* with the total spent and income). Tap a month for its book: spent / income / saved, entries grouped by day with daily totals, *Where the money went* by category, previous/next month, export, and Cash In/Out with that month's date |
+| **Transactions** | *All entries* tab: search; filter by type, category, payment method, month, date range; sort by date or amount; grouped by month with monthly totals; tap any row to edit or delete; Import and CSV export buttons |
 | **Loans** | Loan dashboard (section 11) |
 | **Loan details** | Section 11 |
 | **Reports** | Daily / weekly / monthly / yearly with previous/next navigation; Personal finance cards (income, expenses, net savings, investments); Lending cards (lent, repaid, interest earned, outstanding); charts (income vs expense, expense by category, loan outstanding, interest earned, monthly savings); table view; export to Excel, CSV or PDF |
@@ -548,6 +553,8 @@ Failed saves show a red toast with the reason and a **Retry** button; successful
 | Service worker is **network-first** (always fresh code online, cached copy only offline); never touches Firebase requests | `public/sw.js` |
 | Loading screens for sign-in and first data load; a failed data listener shows a banner with **Retry** instead of hanging | `App.tsx`, `useSession.ts`, `Layout.tsx` |
 | `HashRouter`: direct links (e.g. `#/loans`), refresh and back/forward work on GitHub Pages | `App.tsx` |
+
+**Edge fix (Oct 2026):** newer Edge/Chromium versions return a Promise from `window.scrollTo`. An effect written as `useEffect(() => window.scrollTo(0, 0), …)` implicitly returned it, so React tried to call it as a cleanup on the next route change ("u is not a function"). All effects now use a block body. This was reproduced and verified fixed by simulating that browser behaviour.
 
 **Verified:** 30+ consecutive menu clicks, back/forward, and opening every route directly, on mobile and desktop, with zero console errors and no blank screens.
 
@@ -739,7 +746,8 @@ OTP codes appear in the emulator output.
 | Record a repayment | Loans → borrower → **Add Repayment** (interest is taken first automatically) |
 | Close a loan | Loan details → **Mark as Fully Repaid** (optionally records the final settlement) |
 | Remind a borrower | Loan details → **Send Reminder** → WhatsApp / SMS / Call |
-| See monthly totals | Transactions (grouped by month) or **Reports → Monthly** |
+| See monthly totals | **Transactions → Monthly books** → tap a month for its full details |
+| Note interest a borrower paid | Loans → **Interest** on their row (or Loan details → **Receive Interest**) |
 | Bring in old records | **Import data** → choose file → check mapping & preview → **Import** |
 | Get a report file | Reports → **Excel / CSV / PDF** |
 | Keep a personal copy | Settings → **Full backup (.json)** |

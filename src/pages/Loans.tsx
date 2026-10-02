@@ -1,13 +1,13 @@
 import clsx from 'clsx';
-import { CheckCircle2, Download, FileUp, HandCoins, Hourglass, Percent, Plus, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { CheckCircle2, Download, FileUp, HandCoins, Hourglass, LayoutGrid, List, Pencil, Percent, Plus, Search } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { LoanCard } from '../components/Rows';
-import { EmptyState, PageHeader, StatCard, StatusBadge } from '../components/ui/common';
+import { EmptyState, PageHeader, Segmented, StatCard, StatusBadge } from '../components/ui/common';
 import { formatDate, relativeDays, todayISO } from '../lib/dates';
 import { downloadCSV, loansRows } from '../lib/export';
 import { formatINR } from '../lib/format';
-import { computeLoan, portfolio } from '../lib/loans';
+import { computeLoan, describeRate, portfolio } from '../lib/loans';
 import { live } from '../lib/reports';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
@@ -30,6 +30,20 @@ export default function Loans() {
   const tab = (params.get('status') as Tab) || 'all';
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<Sort>('due');
+  const [view, setView] = useState<'list' | 'cards'>(() => {
+    try {
+      return (localStorage.getItem('paisa-ledger:loan-view') as 'list' | 'cards') || 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('paisa-ledger:loan-view', view);
+    } catch {
+      /* ignore */
+    }
+  }, [view]);
   const today = todayISO();
 
   const items = useMemo(() => live(all).map((loan) => ({ loan, s: computeLoan(loan, today) })), [all, today]);
@@ -182,11 +196,110 @@ export default function Loans() {
           />
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {shown.map(({ loan, s }) => (
-            <LoanCard key={loan.id} loan={loan} s={s} />
-          ))}
-        </div>
+        <>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-base font-bold">All borrowers ({shown.length})</h2>
+            <Segmented
+              value={view}
+              onChange={setView}
+              options={[
+                { value: 'list', label: <span className="flex items-center gap-1.5"><List size={14} /> List</span> },
+                { value: 'cards', label: <span className="flex items-center gap-1.5"><LayoutGrid size={14} /> Cards</span> },
+              ]}
+            />
+          </div>
+          {view === 'cards' ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {shown.map(({ loan, s }) => (
+                <LoanCard key={loan.id} loan={loan} s={s} />
+              ))}
+            </div>
+          ) : (
+            <div className="card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="num w-full min-w-[960px] text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-white/5 dark:bg-white/[0.02] dark:text-slate-400">
+                      <th className="px-4 py-3">Borrower</th>
+                      <th className="px-3 py-3 text-right">Lent</th>
+                      <th className="px-3 py-3">Last interest</th>
+                      <th className="px-3 py-3">Next interest due</th>
+                      <th className="px-3 py-3 text-right">Interest due</th>
+                      <th className="px-3 py-3 text-right">Outstanding</th>
+                      <th className="px-3 py-3">Status</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-white/[0.03]">
+                    {shown.map(({ loan, s }) => {
+                      const closed = s.status === 'fully-paid';
+                      const canInterest = !closed && loan.interestType !== 'fixed' && loan.interestRate > 0;
+                      return (
+                        <tr key={loan.id} className="hover:bg-slate-50 dark:hover:bg-white/5">
+                          <td className="px-4 py-3">
+                            <Link to={`/loans/${loan.id}`} className="font-semibold hover:text-brand-600 dark:hover:text-brand-300">
+                              {loan.borrowerName}
+                            </Link>
+                            <div className="text-xs text-slate-500 dark:text-slate-400">{loan.phone || 'No phone'} · since {formatDate(loan.startDate)}</div>
+                          </td>
+                          <td className="px-3 py-3 text-right">
+                            <div className="font-semibold">{formatINR(s.principal)}</div>
+                            <div className="whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">{describeRate(loan)}</div>
+                          </td>
+                          <td className="px-3 py-3 text-xs">
+                            {s.lastInterestPayment ? (
+                              <>
+                                <div className="font-semibold text-sky-600 dark:text-sky-300">{formatINR(s.lastInterestPayment.amount)}</div>
+                                <div className="text-slate-500 dark:text-slate-400">{formatDate(s.lastInterestPayment.date)}</div>
+                              </>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className={clsx('px-3 py-3 text-xs', s.nextInterestDueDate && s.nextInterestDueDate < today ? 'font-semibold text-rose-600 dark:text-rose-400' : '')}>
+                            {s.nextInterestDueDate ? (
+                              <>
+                                <div>{formatDate(s.nextInterestDueDate)}</div>
+                                <div className="text-slate-500 dark:text-slate-400">{relativeDays(s.nextInterestDueDate, today)}</div>
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-right font-semibold text-sky-600 dark:text-sky-300">{formatINR(s.remainingInterest)}</td>
+                          <td className="px-3 py-3 text-right font-bold text-violet-600 dark:text-violet-300">{formatINR(s.totalOutstanding)}</td>
+                          <td className="px-3 py-3">
+                            <StatusBadge status={s.status} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex justify-end gap-1">
+                              {canInterest && (
+                                <button className="btn-ghost px-2 py-1.5 text-xs text-sky-700 dark:text-sky-300" onClick={() => open({ kind: 'interest', loanId: loan.id })} title="Receive interest">
+                                  <Percent size={14} /> Interest
+                                </button>
+                              )}
+                              {!closed && (
+                                <button className="btn-ghost px-2 py-1.5 text-xs text-emerald-700 dark:text-emerald-300" onClick={() => open({ kind: 'repayment', loanId: loan.id })} title="Add repayment">
+                                  <Plus size={14} /> Repay
+                                </button>
+                              )}
+                              <button className="btn-ghost px-2 py-1.5 text-xs" onClick={() => open({ kind: 'loan', editId: loan.id })} title="Edit loan">
+                                <Pencil size={14} /> Edit
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <button className="btn-primary mt-4 w-full sm:w-auto" onClick={() => open({ kind: 'loan' })}>
+            <Plus size={16} /> Add another person's loan
+          </button>
+        </>
       )}
     </div>
   );

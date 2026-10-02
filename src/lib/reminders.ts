@@ -1,5 +1,5 @@
 import type { Loan, Transaction } from '../types';
-import { addMonths, endOfMonth, formatDate, formatMonth, relativeDays, startOfMonth, todayISO } from './dates';
+import { addMonths, diffDays, endOfMonth, formatDate, formatMonth, relativeDays, startOfMonth, todayISO } from './dates';
 import { formatINR } from './format';
 import { computeLoan } from './loans';
 import { txTotals, live } from './reports';
@@ -47,6 +47,22 @@ export function buildReminders(loans: Loan[], txs: Transaction[], windowDays = 7
       });
     }
   }
+  // Interest instalments (tracked from the last time interest was received).
+  for (const l of live(loans)) {
+    const s = computeLoan(l, today);
+    if (s.status === 'fully-paid' || !s.nextInterestDueDate || s.remainingInterest <= 0) continue;
+    const days = diffDays(today, s.nextInterestDueDate);
+    if (days > windowDays) continue;
+    out.push({
+      id: `int-${l.id}`,
+      kind: days < 0 ? 'pending' : 'due-soon',
+      loanId: l.id,
+      date: s.nextInterestDueDate,
+      title: days < 0 ? `Interest pending from ${l.borrowerName}` : `Interest from ${l.borrowerName} due ${relativeDays(s.nextInterestDueDate, today)}`,
+      message: `${formatINR(s.remainingInterest)} interest due · last received ${s.lastInterestPayment ? formatDate(s.lastInterestPayment.date) : 'never'}`,
+    });
+  }
+
   const order = { overdue: 0, pending: 1, 'due-soon': 2, summary: 3 };
   out.sort((a, b) => order[a.kind] - order[b.kind] || a.date.localeCompare(b.date));
 
