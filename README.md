@@ -8,6 +8,10 @@ module**, so it never mixes with your daily income and expense calculations.
 - ☁️ **Data saved to your account** in a cloud database (Firestore). It survives cache clears, browser changes and new devices, and works offline.
 - 🛡️ **Private by design**: server-side security rules mean each user can read and write only their own records
 - 📥 **Import** from Excel (.xlsx), CSV and PDF with column mapping, preview, validation and duplicate detection
+- 🧮 **Interest Calculation** for money lent: interest received with history, next interest due, repayments, all-borrowers list
+- 📒 **Calculation Notes**: unlimited separate calculations (e.g. paddy harvest) with spent/received totals
+- 📈 **Investments & Insurance**: SIP, LIC, term insurance or any record, with entries by month and due reminders
+- 🛟 **Never lose data**: no permanent deletes (server-enforced), Trash, version history, offline sync, installable app
 - 📤 **Export** to Excel, CSV and PDF with separate sections for expenses, income, investments, loans, repayments and outstanding loans
 
 Built with React + TypeScript + Vite, Tailwind CSS, Recharts, Zustand, Firebase, ExcelJS and pdf.js.

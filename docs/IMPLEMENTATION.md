@@ -1,779 +1,597 @@
-# Paisa Ledger: Implementation Guide
+# Paisa Ledger: Complete Implementation & User Guide
 
-> Complete technical and setup documentation for the Paisa Ledger personal finance & loan management app.
-> Live site: **https://hemanthkumar1198.github.io/App_creation/**
-> Repository: **https://github.com/Hemanthkumar1198/App_creation**
+> Personal finance, interest calculation, notes and investment tracker (₹ INR).
+>
+> | | |
+> |---|---|
+> | **Live app** | https://hemanthkumar1198.github.io/App_creation/ |
+> | **Repository** | https://github.com/Hemanthkumar1198/App_creation |
+> | **Firebase project** | `paisa-ledger-cb5d7` (owned by your Google account) |
+> | **Security rules** | [`firestore.rules`](../firestore.rules) |
 
 ---
 
 ## Table of contents
 
+**Part A — Using the app**
 1. [What the app does](#1-what-the-app-does)
-2. [Who can see your data (privacy)](#2-who-can-see-your-data-privacy)
-3. [Technology stack](#3-technology-stack)
-4. [Architecture overview](#4-architecture-overview)
-5. [Project structure](#5-project-structure)
-6. [Data model](#6-data-model)
-7. [Authentication (login)](#7-authentication-login)
-8. [Data storage & sync](#8-data-storage--sync)
-9. [Security](#9-security)
-10. [Financial calculations](#10-financial-calculations)
-11. [Loans module (kept separate from expenses)](#11-loans-module-kept-separate-from-expenses)
-12. [Pages & features](#12-pages--features)
-13. [Import (Excel / CSV / PDF)](#13-import-excel--csv--pdf)
-14. [Export & backup](#14-export--backup)
-15. [Validation rules](#15-validation-rules)
-16. [Stability & the blank-screen fix](#16-stability--the-blank-screen-fix)
-17. [Deployment (GitHub Pages)](#17-deployment-github-pages)
-18. [Step-by-step: enable login with Firebase](#18-step-by-step-enable-login-with-firebase)
-19. [Testing](#19-testing)
-20. [Local development](#20-local-development)
-21. [Troubleshooting](#21-troubleshooting)
-22. [Known limitations](#22-known-limitations)
-23. [Everyday user guide](#23-everyday-user-guide)
+2. [Who can see your data](#2-who-can-see-your-data)
+3. [Sign in](#3-sign-in)
+4. [Install on phone / computer & offline use](#4-install-on-phone--computer--offline-use)
+5. [Dashboard](#5-dashboard)
+6. [Transactions & Monthly books (Cash Out / Cash In)](#6-transactions--monthly-books-cash-out--cash-in)
+7. [Interest Calculation (money lent)](#7-interest-calculation-money-lent)
+8. [Calculation Notes (separate calculations)](#8-calculation-notes-separate-calculations)
+9. [Investments & Insurance](#9-investments--insurance)
+10. [Reports](#10-reports)
+11. [Import (Excel / CSV / PDF)](#11-import-excel--csv--pdf)
+12. [Export & backup](#12-export--backup)
+13. [Search & reminders](#13-search--reminders)
+14. [Settings, Trash & history](#14-settings-trash--history)
+15. [Everyday quick guide](#15-everyday-quick-guide)
+
+**Part B — How it is built**
+
+16. [Technology stack](#16-technology-stack)
+17. [Architecture](#17-architecture)
+18. [Project structure](#18-project-structure)
+19. [Data model](#19-data-model)
+20. [Data safety: why data is never lost](#20-data-safety-why-data-is-never-lost)
+21. [Security](#21-security)
+22. [Financial calculations](#22-financial-calculations)
+23. [Validation rules](#23-validation-rules)
+24. [Stability fixes](#24-stability-fixes)
+25. [Testing](#25-testing)
+
+**Part C — Setup & maintenance**
+
+26. [Firebase setup (already done)](#26-firebase-setup-already-done)
+27. [Updating security rules](#27-updating-security-rules)
+28. [Deployment (GitHub Pages)](#28-deployment-github-pages)
+29. [Local development](#29-local-development)
+30. [Troubleshooting](#30-troubleshooting)
+31. [Known limitations](#31-known-limitations)
+32. [Change log](#32-change-log)
 
 ---
+
+# Part A — Using the app
 
 ## 1. What the app does
 
-Paisa Ledger is a mobile-first web app (installable on a phone like an app) for tracking money in **Indian Rupees (₹)**:
-
-| Area | Purpose |
-|---|---|
-| **Personal finance** | Daily income and expenses (salary, food, petrol, bills, rent, shopping…), monthly totals, savings |
-| **Loans / lending** | Money you lent to people, interest, repayments, due dates, outstanding balances, overdue tracking |
-| **Reports** | Daily / weekly / monthly / yearly reports and charts |
-| **Import / export** | Bring data in from Excel, CSV or PDF; export to Excel, CSV, PDF or a JSON backup |
-| **Login** | Google account or mobile number + OTP; each login has its own private data |
-
-**Loans are never mixed with daily expenses.** Money lent is not an expense, and repayments received are not income. They are tracked only in the Loans module.
-
----
-
-## 2. Who can see your data (privacy)
-
-| Party | Can see your data? |
-|---|---|
-| **You (signed in)** | ✅ Yes: only your own records |
-| **Other users of the app** | ❌ No: blocked by database security rules (tested) |
-| **Anyone not signed in** | ❌ No |
-| **Claude / Anthropic** | ❌ No: Claude only wrote the code. The app never sends data to Claude or Anthropic. |
-| **The developer of the code** | ❌ No: the database lives in **your own** Firebase project, under **your** Google account |
-| **Google (Firebase hosting provider)** | Stores the encrypted database on your behalf, as with any Google service |
-
-Optional copies exist **only if you choose them**:
-- **Download backup (.json / Excel / PDF)**: a file saved to *your* computer when *you* click the button.
-- **Firestore point-in-time recovery**: an optional Firebase setting you may turn on. It is off unless you enable it.
-
----
-
-## 3. Technology stack
-
-| Layer | Technology | Why |
+| Section | Menu (desktop / phone) | Purpose |
 |---|---|---|
-| UI framework | **React 18 + TypeScript** | Reliable, typed component code |
-| Build tool | **Vite 6** | Fast builds; output is static files |
-| Styling | **Tailwind CSS 3** | Consistent, responsive design; light & dark themes |
-| Charts | **Recharts 2** | Income vs expense, trends, cash-flow charts |
-| State management | **Zustand 5** | Small, predictable global store |
-| Routing | **React Router 6 (HashRouter)** | Works on static hosting; direct links and back/forward work |
-| Login | **Firebase Authentication** | Google sign-in and phone OTP, with secure sessions |
-| Database | **Cloud Firestore** | Per-user storage, offline cache, security rules |
-| Excel import/export | **ExcelJS** (lazy-loaded) | Reads and writes real `.xlsx` workbooks |
-| PDF import | **pdf.js** (lazy-loaded) | Extracts text tables from PDF statements |
-| PDF export | **jsPDF + jspdf-autotable** (lazy-loaded) | Clean printable reports |
-| Icons | **lucide-react** | Consistent icon set |
-| Tests | **Vitest** + Playwright end-to-end scripts | Calculation, import and full-flow tests |
-| Hosting | **GitHub Pages** via GitHub Actions | Free HTTPS hosting |
+| **Dashboard** | Dashboard / Home | Balance, this month's income & spending, interest summary, shortcuts |
+| **Transactions** | Transactions / Cashbook | Daily income & expenses, monthly books (Cash Out and Cash In kept separate) |
+| **Interest Calculation** | Interest Calculation / Interest | Money lent to people on interest: interest received, pending, repayments |
+| **Calculation Notes** | Calculation Notes / Notes | Separate calculations for one purpose (paddy harvest, construction, wedding…) |
+| **Investments & Insurance** | Investments & Insurance / More → Investments | SIP, LIC, term insurance, gold, chit fund, any record with its own entries |
+| **Reports** | Reports / More → Reports | Daily / weekly / monthly / yearly reports and charts |
+| **Import** | Import data / More → Import | Bring in records from Excel, CSV or PDF |
+| **Settings** | Settings / More → Settings | Account, install, export & backup, Trash, history |
 
-There is **no custom server**. The browser talks directly to Firebase over HTTPS, and Firestore security rules act as the server-side authorization layer.
+**Everything is kept separate.** Interest-calculation money, calculation notes and investments are **never mixed** into daily income/expense totals. Cash In and Cash Out have separate books and totals.
+
+All amounts are in Indian Rupees (₹), with Indian digit grouping (₹1,00,000) and rounding to 2 decimals.
 
 ---
 
-## 4. Architecture overview
+## 2. Who can see your data
 
-```
-┌──────────────────────────── Browser (phone / laptop) ────────────────────────────┐
-│                                                                                   │
-│  Pages (Dashboard, Transactions, Loans, Reports, Import, Settings, Search, Login)  │
-│        │  read state                        │  user actions (save / delete …)     │
-│        ▼                                    ▼                                     │
-│  ┌──────────────┐   validated ops    ┌──────────────────┐                         │
-│  │ Zustand store│ ─────────────────▶ │ Backend (commit) │                         │
-│  │  useStore    │ ◀───── snapshots ─ │  cloud | local   │                         │
-│  └──────────────┘                    └────────┬─────────┘                         │
-│        ▲                                      │                                   │
-│        │ pure functions                       │                                   │
-│  lib/finance.ts · lib/loans.ts · lib/reports.ts · lib/importers.ts · lib/export.ts │
-└───────────────────────────────────────────────┼───────────────────────────────────┘
-                                                │ HTTPS (TLS)
-                         ┌──────────────────────┴───────────────────────┐
-                         │ Firebase (your project)                      │
-                         │  • Authentication (Google, Phone OTP)        │
-                         │  • Firestore: users/{uid}/…  + security rules│
-                         └──────────────────────────────────────────────┘
-```
-
-**Key design decisions**
-
-1. **All financial maths is in pure functions** (`src/lib/finance.ts`, `src/lib/loans.ts`), never hard-coded in the UI, and is unit-tested.
-2. **Every user action becomes a list of operations** (`Op[]`) committed **atomically** (all or nothing) by the active backend.
-3. **Two interchangeable backends:**
-   - **Cloud** (Firestore) when Firebase is configured: login required.
-   - **Device-only** (browser storage) when Firebase is not configured: no login.
-4. **IDs are generated on the device**, so retrying a failed save can never create a duplicate.
+| Who | Access |
+|---|---|
+| **You (signed in)** | ✅ Only your own records |
+| Other users of the app | ❌ Blocked by the database rules (tested: "permission denied") |
+| Anyone not signed in | ❌ Blocked |
+| Claude / Anthropic | ❌ No access. Claude wrote the code only; the app never sends data to Claude or Anthropic |
+| The code's developer | ❌ No access. The database is in **your** Firebase project under **your** Google account |
+| Google (Firebase) | Hosts the database for you, encrypted, like any Google service |
 
 ---
 
-## 5. Project structure
+## 3. Sign in
+
+- **Continue with Google**: free and recommended.
+- **Continue with mobile number (OTP)**: real SMS needs the Firebase **Blaze** plan (pay-as-you-go with a free monthly allowance). On the free plan, use Google.
+- You stay signed in until you sign out. **Sign out** (Settings → Account & security) also removes the offline copy from that device.
+- **Same data with both methods:** Google and phone are separate accounts unless linked. In **Settings → Account & security → Sign-in methods**, use **Link Google** / **Link number**.
+- **First sign-in on a browser that already had data:** the app offers **Upload** to move that data into your account.
+
+---
+
+## 4. Install on phone / computer & offline use
+
+**Install**
+- **Settings → Install app & offline → Install app on this device** (Chrome / Edge / Android), or
+- Edge/Chrome desktop: the install icon in the address bar, or menu → **Apps → Install Paisa Ledger**
+- Android Chrome: menu **⋮ → Install app / Add to Home screen**
+- iPhone Safari: **Share → Add to Home Screen**
+
+**Offline**
+- After opening the app once online, **every page opens without internet**: all app files are downloaded at install.
+- Entries added offline are saved on the device, the app shows *"saved offline, will sync"*, and they upload automatically when you're back online.
+- The top bar shows the status: **Saved** (green), **Saving…** (blue), **Offline · will sync** (amber).
+
+---
+
+## 5. Dashboard
+
+- **Current balance** = personal income − personal expenses (interest records, notes and investments are excluded).
+- Big buttons: **+ Cash In**, **− Cash Out**, **Add Interest Record**.
+- Cards: *Personal expenses (this month)* · *Money lent (total)* · *Outstanding interest records*.
+- Personal finance: this month's income/expenses, all-time totals.
+- Shortcuts to **Calculation Notes** (top calculations with totals) and **Investments & Insurance** (payments due this week / paid this year).
+- Charts: Income vs Expense (6 months), monthly expenses.
+- **Interest calculation summary**: Total Lent · Total Repaid · Interest Earned · Outstanding, plus counts of active / overdue / due soon / fully repaid.
+- Upcoming due dates, recent transactions, recent repayments, where the money went this month.
+
+---
+
+## 6. Transactions & Monthly books (Cash Out / Cash In)
+
+**Quick entry (about 3 taps):** Cash In / Cash Out → amount → category → Save. You can also set the date (Today / Yesterday chips), payment method (Cash, UPI, Bank Transfer, Debit/Credit Card, Cheque, Other), description and notes. **Save & add another** keeps the form open.
+
+**Categories:** Food, Shopping, Travel, Petrol/Fuel, Bills, Rent, Entertainment, Medical, Investment, Personal, Gift, Other; income also has Salary, Business, Freelance, Refund.
+
+**Monthly books** (the default tab, like a cashbook app)
+- Switch between **Cash Out** and **Cash In** at the top. They are separate books with separate totals and are never netted.
+- One line per month, e.g. *Sep 2026 expenses −₹4,200* or *Oct 2026 cash in +₹56,000*.
+- Tap a month to see Cash Out (spent) and Cash In (received) as **separate totals**, entries **grouped by day** with daily totals, *Where the money went / came from* by category, previous/next month, export, and Cash In/Out buttons that add to that month.
+
+**All entries** tab: search, filter by type / category / payment method / month / date range, sort by date or amount, grouped by month (tap a month header to open its book). Tap any entry to **edit** or **delete** (deleted entries go to Trash and can be restored).
+
+---
+
+## 7. Interest Calculation (money lent)
+
+Records of money you lent to people on interest. These are **not** counted as expenses, and repayments are **not** counted as income.
+
+**Add an interest record:** borrower name, mobile (optional), amount lent, date lent, interest type (**% per month**, **% per year**, or **fixed ₹**), simple or compound (monthly/quarterly/half-yearly/yearly compounding), duration ⇄ due date, payment frequency, optional *interest calculation end date*, and notes. A live preview shows the interest for the full term and the total due.
+
+**All borrowers list** (default view; switch to *Cards* if you prefer). One row per person with amount lent & rate, **last interest received**, **next interest due**, **interest due now**, outstanding and status, plus **Interest / Repay / Edit** buttons on every row. **Add another person** sits under the list and on every record page.
+
+**Status:** Active · Partially Paid · Fully Repaid · Overdue (plus a *Due soon* flag). Filter by status and search by name, phone or amount.
+
+**Record page**
+- Outstanding (principal + interest), progress, and **Interest accrued until today** with the formula shown (e.g. ₹50,000 × 2% × 3.67 months).
+- **Receive Interest**: note an interest-only payment (amount, date, method, notes). Quick chips: *All due* and *1 month*. **The next interest is counted from that date.** Up to 12 months of interest can be received in advance.
+- **Interest received** section: last received, **next interest due** (last payment + one period: monthly, or the record's payment frequency), interest due now, total received, and a history table: *Received on · For period (from → to) · Interest · Method/notes*.
+- **Add Repayment**: principal and/or interest. The split is automatic (interest first) or manual, and a repayment can't exceed the outstanding amount.
+- **Repayment timeline**: Date | Amount | Principal | Interest | Balance.
+- **Mark as Fully Repaid** (optionally records the final settlement), **Edit**, **Send Reminder** (WhatsApp / SMS / Call / Copy, with the amount filled in), **Move to Trash**.
+
+---
+
+## 8. Calculation Notes (separate calculations)
+
+For calculations that must stay apart from daily expenses, e.g. **Paddy harvest 2026**, *Borewell work*, *House construction*, *Wedding*, *Trip*.
+
+- Create **any number** of calculations with **any name**: **+ New calculation** (on the list and inside every calculation) or the **Create another calculation** tile. Quick name chips are available.
+- Inside a calculation: **Add expense** (e.g. Labour ₹4,000, Fertiliser ₹2,500) and **Add received** (e.g. Paddy sale ₹30,000). Each entry has what for, amount, date and notes, with suggestions from earlier entries. **Save & add another** is available.
+- Totals: **Total spent · Received · Profit** (or *Net cost*).
+- **Spent on** breakdown adds the same items together (e.g. all *Labour* = ₹5,500).
+- Tap an entry to edit or remove it (a copy is kept in history). **Rename**, **Export** (CSV) or **Move to Trash** (restorable).
+
+---
+
+## 9. Investments & Insurance
+
+Fully flexible records for SIP, mutual funds, LIC, term / health / vehicle insurance, PPF, FD/RD, gold, or **anything you type** (e.g. *Chit fund*, *Post office*).
+
+- **+ New record** with any name. Pick a type or type your own; provider/insurer, policy/folio number, cover/target and notes are optional.
+- **Regular amount and schedule are optional.**
+  - With a regular amount (e.g. ₹5,000 monthly SIP, ₹12,000 yearly LIC): the app tracks the **next due date** (last payment + one period), overdue status and yearly commitment, and reminds you under the 🔔 bell.
+  - Without one: just add entries whenever you like.
+- **Add entry** (what for, amount, date, method, notes), like monthly expenses. Entries are **grouped by month with monthly totals**. **Save & add another** is available.
+- Record page: total paid, paid this year, next due or number of entries, details, entries by month, Edit, Move to Trash.
+- List page: **Paid this year**, **Invested (all time)**, **Premiums paid (all time)**, **Yearly commitment**, *Due in the next 30 days* with Pay buttons, and filters All / Investments / Insurance.
+
+---
+
+## 10. Reports
+
+Daily / Weekly / Monthly / Yearly with previous/next navigation.
+- **Personal finance**: income, expenses, net savings, investments (Investment category).
+- **Lending**: lent, repaid, interest earned, outstanding (as of period end).
+- Charts: Income vs Expense, Expense by category, Loan outstanding, Interest earned, Monthly savings (income − expenses), plus a table view.
+- **Export Excel / CSV / PDF** for the selected period.
+
+---
+
+## 11. Import (Excel / CSV / PDF)
+
+**Import data** → choose a file → check settings → preview → **Import**. **Nothing is saved until you confirm.**
+
+1. **File:** `.xlsx`, `.csv` or text-based `.pdf` (up to 15 MB / 5,000 rows). Old `.xls` → save as `.xlsx`/CSV first. Scanned image PDFs can't be read.
+2. **Settings:** sheet, *Import as* (Income & expenses / Interest records), header row (auto-detected), date format (DD/MM default), column mapping (auto-matched, adjustable), the default type for unsigned amounts, and whether rates are % per month or per year.
+3. **Preview:** every row is *Ready*, *Duplicate* (skipped unless ticked) or *Needs fixing* (with the reason). Cells are editable.
+
+It understands bank statements (Withdrawal/Deposit, Cr/Dr), amounts like `₹1,00,000.50`, `Rs. 4,500`, `(250)`, and dates like `01/10/2026`, `15-Dec-2026`, `1 Oct 2026` or Excel serial numbers. It guesses categories (Swiggy → Food, HP → Petrol/Fuel, Uber/IRCTC → Travel…) and payment methods (UPI/GPay → UPI, NEFT → Bank Transfer…), and skips total and balance lines.
+
+---
+
+## 12. Export & backup
+
+| Format | Where | Content |
+|---|---|---|
+| **Excel (.xlsx)** | Settings, Reports | *Summary* + separate sheets: Daily Expenses · Income · Investments · Loans (Money Lent) · Loan Repayments · Outstanding Loans · **Calculation Notes** · **Investments & Insurance** |
+| **CSV** | Settings, Reports, Transactions, Interest, each month book, each calculation | Same sections, one after another (opens in Excel) |
+| **PDF** | Settings, Reports | Printable report with one table per section (₹ shown as "Rs.") |
+| **Full backup (.json)** | Settings → Export & backup | Everything, restorable with **Restore backup** (current items go to Trash, never erased) |
+
+---
+
+## 13. Search & reminders
+
+**Search** (top bar, or More → Search): transactions, people, interest records, repayments, amounts (`4500`, `₹4,500`) and dates (`01/10/2026`, `01 Oct 2026`), with filters for type, status, category, payment method and date range.
+
+**🔔 Reminders:** overdue interest records, records due soon, missed instalments, **interest due from a borrower**, **SIP/premium due or overdue**, and last month's expense summary. The window is set in Settings (default 7 days). Optional browser notifications.
+
+---
+
+## 14. Settings, Trash & history
+
+- **Your data is protected**: a plain summary of the guarantees.
+- **Install app & offline**
+- **Account & security**: sign-in methods, link Google/phone, sign out.
+- **Profile & appearance**: name (used in greetings and reminders), Light/Dark/System theme.
+- **Export & backup**
+- **Reminders**: window, browser notifications.
+- **Trash**: every deleted transaction, interest record, calculation and investment record. **Restore** any time; items are kept forever.
+- **Activity history**: log of every change.
+- **Data**: *Load demo data* (current data moves to Trash; type `DEMO`), *Clear: move all to Trash* (type `TRASH`).
+
+---
+
+## 15. Everyday quick guide
+
+| I want to… | Do this |
+|---|---|
+| Add an expense | Home → **− Cash Out** → amount → category → Save |
+| Add income | Home → **+ Cash In** → amount → category → Save |
+| See a month's spending | Cashbook → **Monthly books → Cash Out** → tap the month |
+| See a month's money received | Cashbook → Monthly books → **Cash In** → tap the month |
+| Lend money on interest | Interest → **Add interest record** |
+| Note interest a borrower paid | Interest → **Interest** on their row (or record page → **Receive Interest**) |
+| Record principal returned | Interest → **Repay** on their row |
+| Start a separate calculation (paddy…) | Notes → **+ New calculation** → Add expense / Add received |
+| Track SIP / LIC / term plan / anything | More → Investments → **+ New record** → **Add entry** |
+| Find something | 🔍 search at the top |
+| Restore a deleted item | Settings → **Trash → Restore** |
+| Keep a personal copy | Settings → **Full backup (.json)** or **Excel** |
+| Use like an app | Settings → **Install app** |
+
+---
+
+# Part B — How it is built
+
+## 16. Technology stack
+
+| Layer | Technology |
+|---|---|
+| UI | React 18 + TypeScript, Tailwind CSS 3, lucide icons |
+| Build | Vite 6 (static files) |
+| Charts | Recharts 2 |
+| State | Zustand 5 |
+| Routing | React Router 6 (`HashRouter`: direct links, refresh, back/forward work on static hosting) |
+| Login | Firebase Authentication (Google, phone OTP) |
+| Database | Cloud Firestore with offline persistence (IndexedDB) and security rules |
+| Excel | ExcelJS (lazy-loaded) |
+| PDF import / export | pdf.js / jsPDF + autotable (lazy-loaded) |
+| Offline / install | Service worker with precache manifest, web app manifest, PNG icons |
+| Tests | Vitest (35 unit tests) + Playwright end-to-end runs against Firebase emulators |
+| Hosting | GitHub Pages via GitHub Actions |
+
+There is no custom server: the browser talks to Firebase over HTTPS, and the **security rules run on Google's servers**.
+
+---
+
+## 17. Architecture
+
+```
+Browser (phone / laptop, installable, works offline)
+ ├─ Pages: Dashboard · Transactions · MonthBook · Interest (Loans) · LoanDetail · Notes · NoteDetail
+ │         Investments · PlanDetail · Reports · Search · Import · Settings · More · Login
+ ├─ Zustand store (useStore) ── validated actions ──► commit(ops)
+ │        ▲ live snapshots                               │ one atomic batch per action
+ │        │                                              │ + previous version → history
+ ├─ Pure logic: finance.ts · loans.ts · plans.ts · reports.ts · importers.ts · export.ts
+ └─ Service worker: precached app files, network-first
+                │ HTTPS
+                ▼
+Firebase project paisa-ledger-cb5d7 (your Google account)
+ ├─ Authentication (Google, Phone)
+ └─ Firestore users/{uid}/…  ← firestore.rules (owner-only, validation, NO deletes)
+```
+
+Principles:
+1. **All money maths is in pure, unit-tested functions**, never inside the UI.
+2. **Every user action = one atomic batch**: the change, the activity-log entry and the previous version are saved together or not at all.
+3. **IDs are created on the device**, so retries can't create duplicates; Save buttons are disabled while saving.
+4. **No delete operation exists** in the code; deletes are soft (Trash).
+5. **Device-only fallback:** if no Firebase config is present, the same app runs with browser storage.
+
+---
+
+## 18. Project structure
 
 ```
 App_creation/
-├── index.html                    App shell (theme applied before first paint)
+├── index.html                 App shell, theme before first paint, PWA meta tags
 ├── public/
-│   ├── icon.svg                  App icon
-│   ├── manifest.webmanifest      "Add to Home Screen" (PWA) settings
-│   └── sw.js                     Service worker: offline support, network-first
+│   ├── manifest.webmanifest   Install settings (name, icons, standalone)
+│   ├── sw.js                  Service worker: precache + network-first + offline fallback
+│   └── icon*.png, icon.svg    App icons (192, 512, maskable, Apple)
+├── vite.config.ts             Build + precache-manifest.json generator
+├── firestore.rules            Database security rules (paste into Firebase)
+├── firebase.json              Rules path + emulator ports (testing)
 ├── src/
-│   ├── main.tsx                  Entry point; registers service worker
-│   ├── App.tsx                   Login gate, routes, error boundaries, sheets, notifications
-│   ├── types.ts                  Data types (Transaction, Loan, Repayment, Settings…)
-│   ├── index.css                 Tailwind + design tokens
+│   ├── firebase-config.ts     Your Firebase web config (public identifiers)
+│   ├── App.tsx                Login gate, routes, error boundaries, sheets, notifications
+│   ├── types.ts               Transaction, Loan, Repayment, CalcNote, NoteEntry, Plan, PlanPayment, HistoryEntry…
 │   ├── lib/
-│   │   ├── finance.ts            Interest formulas & rounding (pure)
-│   │   ├── loans.ts              Loan engine: accrued interest, balances, status, due dates
-│   │   ├── reports.ts            Period maths, totals, category breakdowns
-│   │   ├── reminders.ts          Overdue / due-soon / pending / monthly summary
-│   │   ├── importers.ts          CSV/XLSX/PDF parsing, column mapping, validation, duplicates
-│   │   ├── export.ts             Excel / CSV / PDF / JSON export in separate sections
-│   │   ├── dates.ts              Timezone-safe date helpers
-│   │   ├── format.ts             ₹ formatting (Indian digit grouping), IDs
-│   │   ├── categories.ts         Categories & payment methods
-│   │   ├── firebase.ts           Firebase initialisation (offline cache, emulator switch)
-│   │   ├── phone.ts              Indian mobile number → +91 format
-│   │   ├── lazy.ts               Lazy page loading with crash recovery
-│   │   ├── useSave.ts            Save helper: saving state, success/error toasts, retry
-│   │   ├── finance.test.ts       20 calculation tests
-│   │   └── importers.test.ts     10 import tests
+│   │   ├── finance.ts         Interest formulas, rounding
+│   │   ├── loans.ts           Interest engine: accrual, balances, status, due dates, interest receipts
+│   │   ├── plans.ts           Investments (next due, totals) + calculation-note totals
+│   │   ├── reports.ts         Periods, totals, categories
+│   │   ├── reminders.ts       Bell reminders
+│   │   ├── importers.ts       CSV/XLSX/PDF parsing, mapping, validation, duplicates
+│   │   ├── export.ts          Excel/CSV/PDF/JSON exports (separate sections)
+│   │   ├── install.ts         Install prompt
+│   │   ├── lazy.ts            Lazy pages with crash recovery
+│   │   ├── useSave.ts         Saving state, toasts, retry, double-submit guard
+│   │   └── *.test.ts          Unit tests
 │   ├── store/
-│   │   ├── useStore.ts           Data + validated actions (add/edit/delete, import, restore…)
-│   │   ├── backend.ts            Op types, local (device) backend
-│   │   ├── cloud.ts              Firestore backend: live listeners + atomic batches
-│   │   ├── useSession.ts         Login: Google, phone OTP, linking, sign-out, migration
-│   │   ├── useTheme.ts           Light/dark/system theme (per device)
-│   │   └── useUI.ts              Sheets, toasts, confirmation dialogs
-│   ├── components/
-│   │   ├── Layout.tsx            Sidebar, bottom nav, search, bell, sync status, account
-│   │   ├── ErrorBoundary.tsx     Catches errors so the app never goes blank
-│   │   ├── Rows.tsx              Transaction row, loan card
-│   │   ├── charts/Charts.tsx     Chart components
-│   │   ├── forms/                Transaction, Loan, Repayment, Mark-paid, Reminder forms
-│   │   └── ui/                   Sheet (bottom sheet / dialog), toasts, confirm, cards
-│   ├── pages/                    Login, Dashboard, Transactions, Loans, LoanDetail,
-│   │                             Reports, Search, Import, Settings
-│   └── data/sample.ts            Optional demo data
-├── firestore.rules               Database security rules (paste into Firebase)
-├── firebase.json                 Rules path + emulator ports (for testing)
-├── .env.example                  Template for the 6 Firebase values (local dev)
-├── .github/workflows/
-│   ├── ci.yml                    Runs tests + build on every push
-│   └── deploy.yml                Builds with Firebase values and publishes to GitHub Pages
-└── docs/IMPLEMENTATION.md        This document
+│   │   ├── useStore.ts        Data + validated actions + version history
+│   │   ├── backend.ts         Op types, device-only backend
+│   │   ├── cloud.ts           Firestore listeners + atomic batches
+│   │   ├── useSession.ts      Sign-in, linking, sign-out, data upload offer
+│   │   ├── useTheme.ts, useUI.ts
+│   ├── components/            Layout, ErrorBoundary, InstallCard, charts, forms, UI kit
+│   └── pages/                 All screens listed in section 17
+├── .github/workflows/         ci.yml (tests + build), deploy.yml (publish to Pages)
+└── docs/IMPLEMENTATION.md     This guide
 ```
 
 ---
 
-## 6. Data model
+## 19. Data model
 
-### 6.1 Firestore layout (cloud mode)
+### 19.1 Firestore layout
 
 ```
-users/{uid}                          ← one document per login
-   settings: { userName, reminderDays, browserNotifications, lastPaymentMethod }
-   updatedAt
-users/{uid}/transactions/{id}        ← personal income & expenses
-users/{uid}/loans/{id}               ← money lent (repayments stored inside the loan)
-users/{uid}/activity/{id}            ← append-only change history
+users/{uid}                     { settings, updatedAt }
+users/{uid}/transactions/{id}   daily income & expenses
+users/{uid}/loans/{id}          interest records (repayments embedded)
+users/{uid}/notes/{id}          calculation notes (entries embedded)
+users/{uid}/plans/{id}          investments & insurance (payments/entries embedded)
+users/{uid}/activity/{id}       activity log (append-only)
+users/{uid}/history/{id}        previous versions of changed records (append-only)
 ```
 
-`{uid}` is the unique ID Firebase gives each login. **Data from one login is never visible to another.**
+### 19.2 Records
 
-### 6.2 Transaction (personal income / expense)
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | string | Generated on device (UUID) |
-| `type` | `'income'` \| `'expense'` | |
-| `amount` | number | > 0, rounded to 2 decimals |
-| `date` | `YYYY-MM-DD` | Local calendar date (no timezone drift) |
-| `category` | string | Food, Shopping, Travel, Petrol/Fuel, Bills, Rent, Entertainment, Medical, Investment, Personal, Salary, Business, Freelance, Refund, Gift, Other |
-| `description` | string | ≤ 200 chars |
-| `paymentMethod` | string | Cash, UPI, Bank Transfer, Debit Card, Credit Card, Cheque, Other |
-| `notes` | string | ≤ 1000 chars |
-| `createdAt`, `updatedAt` | ISO timestamp | |
-| `deletedAt` | ISO timestamp? | Set when moved to Trash (soft delete) |
-
-### 6.3 Loan (money lent)
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | string | |
-| `borrowerName` | string | Required |
-| `phone` | string | Optional |
-| `principal` | number | Amount lent, > 0 |
-| `startDate` | `YYYY-MM-DD` | Date lent |
-| `dueDate` | `YYYY-MM-DD` | Must be after `startDate` |
-| `durationMonths` | number | Synced with due date |
-| `interestRate` | number | % per month, % per year, or ₹ amount for fixed |
-| `interestType` | `'monthly'` \| `'yearly'` \| `'fixed'` | |
-| `interestMethod` | `'simple'` \| `'compound'` | |
-| `compounding` | monthly \| quarterly \| half-yearly \| yearly | Used for compound interest |
-| `paymentFrequency` | one-time \| monthly \| quarterly \| half-yearly \| yearly | Drives next due date & instalments |
-| `interestEndDate` | `YYYY-MM-DD`? | Optional manual "Interest calculation end date" |
-| `closedAt` | `YYYY-MM-DD`? | Set by "Mark as Fully Repaid" |
-| `repayments` | Repayment[] | See below |
-| `notes`, `createdAt`, `updatedAt`, `deletedAt?` | | |
-
-### 6.4 Repayment (inside a loan)
-
-| Field | Type |
+| Type | Key fields |
 |---|---|
-| `id`, `amount`, `date`, `paymentMethod`, `principalPortion`, `interestPortion`, `notes`, `createdAt` | `principalPortion + interestPortion = amount` |
+| **Transaction** | id, type (income/expense), amount, date, category, description, paymentMethod, notes, createdAt, updatedAt, deletedAt? |
+| **Loan** (interest record) | id, borrowerName, phone, principal, startDate, dueDate, durationMonths, interestRate, interestType (monthly/yearly/fixed), interestMethod (simple/compound), compounding, paymentFrequency, interestEndDate?, closedAt?, repayments[], notes, timestamps, deletedAt? |
+| **Repayment** | id, amount, date, paymentMethod, principalPortion, interestPortion, notes (interest-only receipts have principalPortion = 0) |
+| **CalcNote** | id, name, description, entries[], timestamps, deletedAt? |
+| **NoteEntry** | id, date, type (out = spent / in = received), amount, description, notes |
+| **Plan** | id, name, kind (any text), provider, policyNumber, amount (0 = no fixed amount), frequency (monthly/quarterly/half-yearly/yearly/one-time = no schedule), startDate, endDate?, coverAmount?, notes, payments[], timestamps, deletedAt? |
+| **PlanPayment** | id, date, amount, description (what for), paymentMethod, notes |
+| **HistoryEntry** | id, at, entity (transaction/loan/note/plan), docId, before (full previous copy) |
+| **ActivityEntry** | id, at, action, entity, label |
 
-### 6.5 Activity entry
-
-`{ id, at, action, entity, label }`: for example *"Received ₹5,000 from Ravi"*. Entries are append-only; the security rules forbid editing or deleting them.
+All dates are `YYYY-MM-DD` local calendar dates (no timezone drift); all amounts are rounded to 2 decimals.
 
 ---
 
-## 7. Authentication (login)
+## 20. Data safety: why data is never lost
 
-Implemented in `src/store/useSession.ts` and `src/pages/Login.tsx`.
-
-### 7.1 Methods
-
-| Method | How it works |
+| Protection | How |
 |---|---|
-| **Google** | `signInWithPopup` with account chooser; falls back to a full-page redirect if the popup is blocked (common on phones) |
-| **Mobile + OTP** | User enters a 10-digit Indian number → converted to `+91XXXXXXXXXX` → invisible reCAPTCHA → SMS OTP → 6-digit code verified. "Resend OTP" has a 30-second cooldown |
+| **Stored in your cloud account** | Firestore keeps multiple replicated copies; clearing the browser or changing device doesn't affect it |
+| **No permanent delete anywhere** | The app has no erase function: delete = move to **Trash** (kept forever, restorable). *Clear*, *Load demo data* and *Restore backup* also move old items to Trash |
+| **Server-enforced** | `firestore.rules` → `allow delete: if false` on the user document, transactions, loans, notes, plans, history and activity |
+| **Version history** | Before any change (edit, delete, restore, removing an entry inside a record), the full previous version is written to `history` **in the same atomic batch**; the rules make history create-only |
+| **Atomic saves** | A change and its log/history entries succeed or fail together |
+| **No duplicates** | Device-generated IDs make retries idempotent; Save buttons are disabled while saving |
+| **Offline-safe** | Offline changes are stored durably on the device and synced automatically |
+| **Your own copies** | Full JSON backup / Excel export any time |
+| **Trash & Undo** | Undo toast after delete; Trash lists everything deleted |
 
-### 7.2 Session
-
-- Sessions persist until you sign out, so you don't log in on every visit. Firebase refreshes tokens automatically.
-- **Sign out** (Settings → Account & security) also **erases this device's offline copy** of your data and reloads the page, so nothing stays on a shared device.
-
-### 7.3 Linking Google + phone
-
-Google and phone logins are separate accounts unless linked. In **Settings → Account & security → Sign-in methods** you can **Link Google** or **Link number**, so either method opens the same data.
-
-### 7.4 First login on a device that already has data
-
-If the browser contains data from device-only mode and your account is empty, the app asks **"Move your existing data to your account?"** Choose *Upload* or *Not now*; nothing is uploaded without your confirmation.
-
-### 7.5 Error messages
-
-Firebase error codes are mapped to plain messages, e.g. *"Incorrect OTP"*, *"This OTP has expired"*, *"Too many attempts"*, *"This website is not authorised for sign-in yet"*.
+**What can still cause loss (outside the app):** deleting the Firebase project itself, or losing access to your Google account. Keep the Google account secure and download a backup now and then.
 
 ---
 
-## 8. Data storage & sync
+## 21. Security
 
-Implemented in `src/store/backend.ts`, `src/store/cloud.ts`, `src/store/useStore.ts`.
-
-### 8.1 How a save works
-
-```
-User taps Save
-  → form validation (instant, on screen)
-  → store action validates again (amounts, dates, outstanding limits)
-  → builds operations, e.g. [put transaction, put activity entry]
-  → backend.commit(ops)
-       cloud: ONE Firestore writeBatch → all-or-nothing
-       local: write browser storage first, then update screen
-  → success toast only after the save is confirmed
-```
-
-- **Atomic:** a change and its activity-log entry are written together or not at all. Large imports are split into batches of 450 (Firestore limit 500).
-- **No duplicates:** IDs are generated before saving, so a retry overwrites the same record and never creates a second one. Save buttons also disable while saving, so rapid double-taps are ignored (tested with a triple-click).
-- **Offline:** Firestore keeps a durable offline copy (IndexedDB). If you're offline, the save is stored on the device and the toast says *"saved offline, will sync when you're online"*. It syncs automatically later.
-- **Live sync:** the app listens to your data in real time, so a change on your phone appears on your laptop within seconds.
-
-### 8.2 Sync indicator (top bar)
-
-| Badge | Meaning |
-|---|---|
-| ☁️ **Saved** (green) | Everything is stored in your account |
-| 🔄 **Saving…** (blue) | Upload in progress |
-| ⛔ **Offline** (amber) | No internet; changes are kept on this device and will sync |
-| 💾 **This device only** (amber) | Firebase not configured; data is stored in this browser |
-
-### 8.3 Protection against accidental loss
-
-| Feature | Detail |
-|---|---|
-| Confirmation dialogs | Before every delete |
-| **No permanent deletes, ever** | The app has no "delete forever" action. Delete = move to Trash, kept forever. *Clear* moves everything to Trash. The database rules deny every delete (server-enforced) |
-| **Version history** | Before any change, the previous version of the record is saved to `users/{uid}/history`, append-only: it can't be edited or removed |
-| **Trash** | Deleted transactions & loans go to *Settings → Trash* and can always be restored |
-| **Undo** | Toast with *Undo* right after deleting |
-| Type-to-confirm | *Clear (move all to Trash)* requires typing `TRASH`; loading demo data requires `DEMO` (old data goes to Trash) |
-| Activity history | Every change logged (append-only in the cloud) |
-| Daily snapshot | Device-only mode keeps one automatic snapshot per day in the browser |
-| Manual backup | JSON / Excel / CSV / PDF download any time |
+- **Owner-only access**: every rule checks `request.auth.uid == uid`; everything else is denied (`match /{document=**} { allow read, write: if false; }`).
+- **Server-side validation**: transactions (type, amount > 0, date format, text lengths), loans (name, principal > 0, due date after start, rate ≥ 0, valid types), notes (name, entries list), plans (name, amount ≥ 0, frequency, payments list), activity/history (append-only).
+- **Verified**: another signed-in user gets 403, a signed-out request gets 403, a negative amount gets 403, deleting a transaction or history entry gets 403, and editing history gets 403.
+- **HTTPS everywhere**; passwordless sign-in (no stored passwords).
+- **No secrets in the code**: the Firebase web config in `src/firebase-config.ts` is a public identifier by design; protection comes from the rules.
+- CSV export guards against Excel formula injection; sign-out clears the device's offline copy.
 
 ---
 
-### 8.4 Install & offline
+## 22. Financial calculations
 
-- **Installable app (PWA):** manifest with PNG icons (192/512/maskable), standalone display. Use *Settings → Install app & offline*, the browser's install icon, or *Add to Home Screen* on phones.
-- **Offline:** the service worker downloads every app file at install (from `precache-manifest.json` generated at build), so all pages open without internet. Firestore keeps an offline copy of your data; entries made offline are queued and sync automatically.
-- Verified: reload with no internet → app opens; a never-visited page opens offline; an entry made offline appears in the cloud once back online.
+All formulas are in `src/lib/finance.ts`, `loans.ts` and `plans.ts`, rounded half-up to 2 decimals.
 
-## 9. Security
-
-### 9.1 Firestore security rules (`firestore.rules`)
-
-These rules run **on Google's servers**, not in the browser, so they can't be bypassed by modifying the app.
-
-- A user can read or write **only** `users/{their own uid}/…`. Everything else is denied.
-- **Transactions** must have: matching `id`, type `income|expense`, amount `> 0` and `≤ 1,00,00,00,00,000`, date in `YYYY-MM-DD`, text fields within length limits.
-- **Loans** must have: borrower name 1–80 chars, principal `> 0`, valid dates with **due date after start date**, rate `≥ 0`, valid interest type/method, ≤ 2000 repayments.
-- **User document** may only contain `settings` and `updatedAt`.
-- **Activity log** and **version history** are append-only: create and read only, never update or delete.
-- **Nothing can be deleted**: `allow delete: if false` on the user document, transactions, loans, history and activity.
-
-Verified with tests: another signed-in user → **403 denied**; not signed in → **403 denied**; a record with a negative amount → **403 rejected**.
-
-### 9.2 Other security measures
-
-| Measure | Implementation |
+| Formula | Definition |
 |---|---|
-| HTTPS | GitHub Pages and Firebase serve only over TLS |
-| Passwordless | No passwords stored anywhere; Google or OTP only |
-| Secrets | **No secret keys in the code.** The 6 Firebase web values are *public identifiers* by design; protection comes from the rules |
-| Tokens | Managed by the Firebase SDK (short-lived ID tokens, auto refresh) |
-| Input validation | In forms, in the store, and again in security rules (three layers) |
-| CSV injection | Exported cells starting with `= + - @` are prefixed so Excel won't run them as formulas |
-| Shared devices | Sign-out wipes the offline cache |
-| reCAPTCHA | Protects OTP sending from abuse |
+| Simple interest | `P × R × T / 100` (T in months for monthly rates, years for yearly) |
+| Compound interest | `P × ((1 + r)^n − 1)` with the chosen compounding |
+| Outstanding principal | `max(0, principal − principal repaid)` |
+| Outstanding interest | `max(0, interest accrued − interest received)` |
+| Remaining balance | outstanding principal + outstanding interest |
+| Elapsed time | whole calendar months + fraction of the next month (01 Oct → 01 Jan = exactly 3) |
 
----
+**Interest accrued until today** is calculated per segment between repayments on the **remaining principal** (simple) or principal + unpaid interest (compound), up to today, or the manual end date, or the date the record was marked repaid.
 
-## 10. Financial calculations
+**Interest receipts:** each interest payment starts the next interest period. *Next interest due* = last interest payment (or the date lent) + one period (monthly, or the payment frequency). *Interest per period* = interest for one period on the remaining principal. Advance interest is allowed up to 12 months.
 
-All in `src/lib/finance.ts` and `src/lib/loans.ts`. Every value is rounded **half-up to 2 decimals** with a float-safe `round2()` (e.g. `1.005 → 1.01`).
+**Investments:** *next due* = last payment + one period (or the start date before the first payment), only when a regular amount and schedule are set. *Yearly commitment* = amount × payments per year.
 
-### 10.1 Formulas
+**Calculation notes:** spent = Σ spent entries, received = Σ received entries, profit/net = received − spent.
 
-| Function | Formula |
-|---|---|
-| `simpleInterest(P, R, T)` | `P × R × T / 100` |
-| `monthlyInterest(P, Rm, months)` | `P × Rm × months / 100` |
-| `yearlyInterest(P, Ry, months)` | `P × Ry × (months/12) / 100` |
-| `compoundInterest(P, r, n)` | `P × ((1 + r/100)^n − 1)` |
-| Compound with frequency | annual rate ÷ periods per year, `n = months × periods per year / 12` |
-| `outstandingPrincipal` | `max(0, principal − principal repaid)` |
-| `outstandingInterest` | `max(0, interest accrued − interest repaid)` |
-| `remainingBalance` | outstanding principal + outstanding interest |
-| `totalRepayment` | principal + interest |
-| `splitRepayment` | pays **interest first**, the rest goes to principal |
-
-### 10.2 Elapsed time
-
-`monthsBetween(start, end)` counts whole calendar months, then adds the remaining days as a fraction of the next month.
-01 Oct 2026 → 01 Jan 2027 = **exactly 3 months**; 31 Jan → 28 Feb = **1 month**.
-
-### 10.3 Interest accrued until today (reducing balance)
-
-```
-start ── repayment 1 ── repayment 2 ── … ── end date
-  segment 1      segment 2       segment 3
-
-simple   : interest += remaining principal × rate × segment time
-compound : interest += (remaining principal + unpaid interest) × ((1+i)^n − 1)
-fixed    : the agreed ₹ amount once the loan has started
-```
-
-The **end date** is the earliest of: today, the manual *Interest calculation end date*, or the date the loan was marked paid.
-
-### 10.4 Worked examples (all covered by unit tests)
+**Worked examples (unit-tested)**
 
 | Case | Result |
 |---|---|
-| ₹50,000 @ 2%/month for 6 months | Interest **₹6,000**, total due **₹56,000** |
-| ₹1,00,000 @ 2%/month, repaid after 3 months (01/10/2026 → 01/01/2027) | Interest **₹6,000** |
-| ₹1,00,000 @ 12%/year for 6 months | Interest **₹6,000** |
-| ₹1,00,000 @ 1%/month compound for 12 months | Interest **₹12,682.50** |
-| ₹50,000 @ 2%/m; repay ₹22,000 (₹2,000 interest + ₹20,000 principal) after 2 months; check 2 months later | Accrued ₹3,200; remaining ₹30,000 + ₹1,200 = **₹31,200** |
-| ₹60,000 @ 18%/year; ₹10,000 repaid after 3 months | First segment interest ₹2,700; then 1.5%/m on ₹52,700 |
+| ₹50,000 @ 2%/month × 6 months | Interest ₹6,000, total ₹56,000 |
+| ₹1,00,000 @ 2%/month, 3 months | ₹6,000 |
+| ₹1,00,000 @ 12%/year, 6 months | ₹6,000 |
+| ₹1,00,000 @ 1%/month compound, 12 months | ₹12,682.50 |
+| ₹50,000 @ 2%/m; ₹1,000 interest received 01 Nov & 05 Dec | Next interest due 05 Jan |
+| Paddy: spent ₹4,000 + ₹2,500.50, received ₹30,000 | Profit ₹23,499.50 |
+| SIP ₹5,000 monthly, last paid 05 Sep | Next due 05 Oct; yearly ₹60,000 |
 
-### 10.5 Loan status
+**Interest record status:** Fully Repaid (nothing outstanding or marked paid) · Overdue (past due date with a balance) · Partially Paid · Active.
 
-| Status | Rule |
+---
+
+## 23. Validation rules
+
+| Rule | Where |
 |---|---|
-| **Fully Repaid** | Nothing outstanding (or marked as paid) |
-| **Overdue** | Today is after the due date and money is outstanding |
-| **Partially Paid** | At least one repayment, not overdue |
-| **Active** | No repayments yet, not overdue |
-| *Due soon* (flag) | Next due date within the reminder window (default 7 days) |
+| Amount > 0 and ≤ ₹1,00,00,00,00,000 (investment regular amount may be empty/0) | form + store + database |
+| Valid real calendar dates | form + store + database |
+| Required: category, borrower name, calculation name, record name | form + store + database |
+| Due date after date lent; end date after start date | form + store (+ database for loans) |
+| Repayment ≤ outstanding; principal portion ≤ remaining principal; portions = total | form + store |
+| Interest receipt ≤ interest due + 12 months in advance | form + store |
+| Principal can't be edited below what's already repaid | store |
+| Double-submit prevention | disabled buttons + one save at a time + idempotent IDs |
 
-### 10.6 Next due date
-
-- One-time loans: the due date.
-- Monthly / quarterly / half-yearly / yearly loans: the next instalment date. If the previous instalment had no repayment, it is shown as **missed** and appears as a *Pending repayment* reminder.
-- Suggested instalment = total amount due ÷ number of instalments.
+Errors appear as a red message with **Retry**; successes as green confirmations.
 
 ---
 
-## 11. Loans module (kept separate from expenses)
+## 24. Stability fixes
 
-| Rule | Where enforced |
+| Issue | Fix |
 |---|---|
-| Current balance = **personal income − personal expenses** only | `personalBalance()` in `lib/reports.ts` |
-| Money lent is **not** counted as an expense | Loans are stored in a separate collection |
-| Repayments are **not** counted as income | Stored inside the loan, never as transactions |
-| Dashboard shows **Personal expenses · Money lent · Outstanding loans** side by side | `pages/Dashboard.tsx` |
-| Reports have separate **Personal finance** and **Lending** sections | `pages/Reports.tsx` |
-| Exports have separate sheets/sections | `lib/export.ts` |
-
-**Example (Ravi):** lent ₹20,000 on 15-Jun-2026, due 15-Dec-2026; Ravi repays ₹5,000.
-→ Repaid ₹5,000 · Remaining ₹15,000 · Status **Partially Paid**. Your daily income is unchanged.
-
-**Loan dashboard (Loans page):** Total lent · Total repaid · Interest earned (and pending) · Outstanding · counts of Active / Overdue / Fully repaid · Upcoming due dates · filters (All, Active, Overdue, Due soon, Partially paid, Fully repaid) · search by borrower, phone or amount · sort by next due, outstanding, newest or name.
-
-**Interest received (per loan):** tap **Receive Interest** to note an interest-only payment (amount, date, method, notes). Each payment starts the next interest period, so the page shows **Last received**, **Next interest due** (last payment + one period: monthly by default, or the loan's payment frequency) and **Interest due now**, plus a history table: *Received on · For period (from → to) · Interest · Method/notes*. Interest can be received up to 12 months in advance. Overdue or upcoming interest also appears under the 🔔 bell.
-
-**All borrowers list:** the Loans page shows every person in one table: amount lent and rate, last interest received, next interest due, interest due, outstanding and status. Each row has **Interest**, **Repay** and **Edit** buttons. Switch to *Cards* if you prefer. **Add another person's loan** sits under the list and at the top of every loan page.
-
-**Loan details page:** borrower, phone (tap to call), principal, rate, dates, total interest, total due, amount paid, remaining, status, *Interest accrued until today* with the formula shown, a manual end-date picker, and the repayment timeline (**Date | Amount | Principal | Interest | Balance**). Buttons: **Add Repayment · Edit Loan · Mark as Fully Repaid · Send Reminder** (WhatsApp / SMS / Call / Copy, with the amount pre-filled).
+| **"u is not a function" / blank page after clicking a menu (Edge)** | Newer Edge/Chromium returns a Promise from `window.scrollTo`; an effect returned it implicitly, so React called it as a cleanup on the next page change. All effects now use block bodies. Reproduced by simulating the new browser behaviour, and verified fixed |
+| One error blanking the whole app | Error boundaries around the app, every page and every form, with *Try again* / *Dashboard* |
+| Stale files after an update | Network-first service worker; lazy pages retry, then reload once automatically |
+| Notifications crashing on Android | Notifications go through the service worker inside try/catch |
+| Database rules not yet updated for a new section | A clear banner explains which rules to publish, and other data keeps working |
 
 ---
 
-## 11a. Calculation Notes & Investments/Insurance
+## 25. Testing
 
-**Calculation Notes** (`/notes`) are separate calculation books for one purpose, e.g. *Paddy harvest 2026* or *House construction*. Each has entries marked **Spent** or **Received** (date, what for, amount, notes). The book shows total spent, total received, profit/net cost, and a "spent on" breakdown grouped by description (e.g. Labour ₹5,500), with CSV export. Notes are **not** counted in daily income/expenses. Stored in `users/{uid}/notes/{id}` with entries embedded.
+**Unit tests** (`npm test`): 35 tests covering interest formulas, both spec examples, reducing balance, compound interest, status, missed instalments, interest receipts and next interest due, advance-interest limit, investments next due & totals, calculation-note totals, CSV/amount/date parsing, header detection & column mapping, duplicates, loan import and PDF table reconstruction.
 
-**Flexible:** create any number of calculations and records with any name ("+ New calculation" / "+ New record" on every page, plus an "add another" tile in each list). Investment records can have any type (pick SIP, LIC… or type your own, e.g. *Chit fund*). The regular amount and schedule are optional; leave them empty and just **Add entry** (what for, amount, date), like monthly expenses. Entries are grouped by month with monthly totals.
-
-**Investments & Insurance** (`/investments`) tracks SIP, mutual funds, LIC, term/health/vehicle insurance, PPF, FD/RD and gold. Each plan has a type, provider, instalment/premium, frequency, start/end date, policy/folio number, cover/target and notes, plus a payment history. **Next due** = last payment + one period (or the start date before the first payment). The page shows paid this year, invested vs premiums (all time), yearly commitment, and payments due in the next 30 days with a **Pay** button. Due and overdue payments appear under the 🔔 bell. Stored in `users/{uid}/plans/{id}`.
-
-Both use the same safety model: soft delete to Trash, version history, and no deletes allowed by the rules. Both are exported as their own sections.
-
-**Naming:** the lending section is labelled **Interest Calculation** (menu: *Interest*). Phone bottom bar: Home · Cashbook · Interest · Notes · More (Investments, Reports, Import, Search, Settings).
-
-> **After this update, re-publish `firestore.rules`** (Firebase → Firestore → Rules → paste → Publish). The new `notes` and `plans` collections are only allowed by the updated rules.
-
-## 12. Pages & features
-
-| Page | Highlights |
-|---|---|
-| **Login** | Continue with Google · Continue with mobile number (OTP) |
-| **Dashboard** | Personal balance; big **+ Cash In / − Cash Out / Add Loan** buttons; personal vs lending cards; Income-vs-Expense and monthly expense charts; lending summary with status counts; upcoming due dates; recent transactions & repayments; spending by category; getting-started card for new accounts |
-| **Monthly books** | Separate **Cash Out** and **Cash In** books (never netted together). Transactions opens on a cashbook-style list of months (e.g. *Sep 2026 expenses* with the total spent and income). Tap a month for its book: spent / income / saved, entries grouped by day with daily totals, *Where the money went* by category, previous/next month, export, and Cash In/Out with that month's date |
-| **Transactions** | *All entries* tab: search; filter by type, category, payment method, month, date range; sort by date or amount; grouped by month with monthly totals; tap any row to edit or delete; Import and CSV export buttons |
-| **Loans** | Loan dashboard (section 11) |
-| **Loan details** | Section 11 |
-| **Reports** | Daily / weekly / monthly / yearly with previous/next navigation; Personal finance cards (income, expenses, net savings, investments); Lending cards (lent, repaid, interest earned, outstanding); charts (income vs expense, expense by category, loan outstanding, interest earned, monthly savings); table view; export to Excel, CSV or PDF |
-| **Search** | Global search across transactions, people, loans, repayments, amounts (`4500`, `₹4,500`) and dates (`01/10/2026`, `01 Oct 2026`); filters for type, loan status, category, payment method and date range |
-| **Import** | Section 13 |
-| **Settings** | Account & security (sign-in methods, sign out); name & theme; export & backup; reminders (window, browser notifications); Trash; activity history; demo data; erase all data |
-| **Reminders (bell)** | Overdue loans, loans due soon, missed instalments, last month's expense summary |
-
-**Quick entry:** Cash In/Out opens a bottom sheet with the amount field focused, one-tap category tiles, Today/Yesterday chips and payment-method chips (remembers your last one). An expense takes about 3 taps.
-
-**Design:** purple/blue accent, green for income, red for expenses, violet for loans; light, dark or system theme; bottom navigation and a floating "+" button on phones, a sidebar on desktop.
+**End-to-end** (Playwright + Firebase Auth/Firestore emulators with the real rules), all passing:
+- OTP sign-in; saves confirmed by the server; a triple-click saves one record
+- Interest record, over-repayment blocked, interest receipt with history, all-borrowers list with edit
+- Monthly books with separate Cash Out / Cash In; month detail by day
+- Calculation notes (several, with totals and breakdown), not mixed with daily transactions
+- Investments: scheduled (SIP/LIC next due) and free-form records with entries grouped by month
+- Delete → Trash (still stored) → restore; version history written; deletes and history edits denied by the server
+- Offline: app opens without internet (including never-visited pages); an offline entry syncs later
+- Import CSV / Excel / PDF; export Excel / CSV / PDF with all section sheets
+- Second device sees the same data; other users blocked; sign-out
+- Navigation stress test with Edge-style `scrollTo` (no crashes)
 
 ---
 
-## 13. Import (Excel / CSV / PDF)
+# Part C — Setup & maintenance
 
-Implemented in `src/lib/importers.ts` and `src/pages/Import.tsx`. **Nothing is saved until you press "Import N records".**
+## 26. Firebase setup (already done)
 
-### 13.1 Steps
+Project **`paisa-ledger-cb5d7`**:
+- [x] Web app registered; config saved in `src/firebase-config.ts` (no GitHub variables needed; `VITE_FIREBASE_*` variables would override it if set)
+- [x] Authentication: **Google** enabled (Phone enabled; real SMS needs Blaze)
+- [x] Authorised domain: `hemanthkumar1198.github.io`
+- [x] Firestore database created (production mode)
+- [x] Security rules published (**re-publish whenever `firestore.rules` changes**, see below)
 
-1. **Upload**: `.xlsx`, `.csv` or `.pdf` (≤ 15 MB, ≤ 5,000 rows).
-2. **Configure:**
-   - Choose the **sheet** (Excel files with several sheets).
-   - **Import as:** *Income & expenses* or *Loans (money lent)*, auto-detected.
-   - **Header row:** auto-detected; change if wrong.
-   - **Date format:** DD/MM/YYYY (default) or MM/DD/YYYY.
-   - **Column mapping:** auto-matched, adjustable per field.
-   - Amounts without a type → treat as Expenses or Income; for loans, whether rates are per month or per year.
-3. **Preview:** every row shows **Ready**, **Duplicate** (skipped unless you tick it) or **Needs fixing** (with the reason). Cells are editable (date, type, amount, category, description, method; for loans: name, phone, amount, dates, rate, repaid).
-4. **Confirm:** selected rows are saved in atomic batches.
-
-### 13.2 What it understands
-
-| Input | Handling |
-|---|---|
-| Bank statements | *Withdrawal/Debit* → expense, *Deposit/Credit* → income; skips *Opening/Closing balance* and *Total* lines and repeated headers |
-| Amounts | `₹1,00,000.50`, `Rs. 4,500`, `(250)` negative, `-300`, `1,200.00 Cr/Dr` |
-| Dates | `01/10/2026`, `25-12-26`, `2026-10-01`, `15-Dec-2026`, `1 Oct 2026`, `Oct 5, 2026`, Excel date numbers; impossible dates (31/02) are rejected |
-| Type column | Income/Expense, Credit/Debit, Cr/Dr, In/Out |
-| Categories | Exact name, or keywords: Swiggy/Zomato → Food, HP/BPCL → Petrol/Fuel, Uber/IRCTC → Travel, Amazon/Myntra → Shopping, Apollo → Medical, SIP/Zerodha → Investment, Salary → Salary … |
-| Payment method | UPI/GPay/PhonePe → UPI, NEFT/IMPS → Bank Transfer, POS/card → Debit Card, ATM/cash → Cash |
-| Loans sheet | Person, Mobile, Amount Lent, Date Lent, Due Date, Interest %, Repaid, Notes. "Repaid" becomes one repayment (interest first, never more than outstanding); a missing due date defaults to 12 months and is noted |
-| Duplicates | Transactions: same date + type + amount + description; loans: same borrower + amount + date lent, checked against existing data **and** within the file |
-| PDF | Text is grouped into lines by position and aligned to the header columns. **Scanned (image) PDFs can't be read**, and the app says so |
-| Old `.xls` | Not supported; save as `.xlsx` or `.csv` first |
-
-The app's own Excel export can be re-imported (sheet names such as *Income* / *Daily Expenses* set the type automatically).
+**Optional:** Blaze plan for phone OTP; budget alert; Firestore *point-in-time recovery* / scheduled backups (Disaster recovery).
 
 ---
 
-## 14. Export & backup
+## 27. Updating security rules
 
-Implemented in `src/lib/export.ts`.
+Needed whenever the app adds a new section (for example notes and plans) or changes validation:
+1. Open https://github.com/Hemanthkumar1198/App_creation/blob/main/firestore.rules → **copy** icon (top-right).
+2. Go to **Firebase console → Firestore Database → Rules** → **Ctrl + A** → **Ctrl + V** → **Publish**.
 
-| Format | Content |
-|---|---|
-| **Excel (.xlsx)** | *Summary* sheet + one sheet each: **Daily Expenses · Income · Investments · Loans (Money Lent) · Loan Repayments · Outstanding Loans**, with ₹ number formats and totals |
-| **CSV** | Same sections one after another (opens in Excel / Google Sheets; UTF-8 so ₹ displays correctly) |
-| **PDF** | A4 landscape report with a summary table and one coloured table per section, plus page numbers (₹ printed as "Rs." because standard PDF fonts lack the ₹ glyph) |
-| **JSON backup** | Complete data, restorable via *Settings → Restore backup* |
-
-Where: **Reports** (selected period) and **Settings → Export & backup** (everything). Loan records are **never merged** into expense sections.
+If you forget, the app shows a banner telling you which rules to publish, and existing data is unaffected.
 
 ---
 
-## 15. Validation rules
+## 28. Deployment (GitHub Pages)
 
-| Rule | Form | Store | Database rules |
-|---|:-:|:-:|:-:|
-| Amount > 0 and ≤ ₹1,00,00,00,00,000 | ✅ | ✅ | ✅ |
-| Valid date (`YYYY-MM-DD`, real calendar date) | ✅ | ✅ | ✅ |
-| Type must be income/expense; category required | ✅ | ✅ | ✅ |
-| Borrower name required | ✅ | ✅ | ✅ |
-| Due date after date lent | ✅ | ✅ | ✅ |
-| Interest rate ≥ 0 (≤ 100% for % rates) | ✅ | ✅ | ✅ (≥ 0) |
-| **Repayment ≤ outstanding on that date** | ✅ | ✅ | n/a |
-| Principal portion ≤ remaining principal | ✅ | ✅ | n/a |
-| Principal + interest portions = repayment amount | ✅ | ✅ | n/a |
-| Repayment date not before date lent | ✅ | ✅ | n/a |
-| Principal can't be edited below what's already repaid | n/a | ✅ | n/a |
-| Phone number format | ✅ | n/a | length only |
-| Double-submit prevention | ✅ (button disabled) | ✅ (one save at a time) | IDs make retries idempotent |
-
-Failed saves show a red toast with the reason and a **Retry** button; successful saves show a green confirmation.
-
----
-
-## 16. Stability & the blank-screen fix
-
-**Problem reported:** clicking a menu sometimes showed a blank page until refresh.
-
-**Root causes addressed:**
-1. **No error boundary**: any runtime error unmounted the whole app. One confirmed trigger: `new Notification()` throws on Android Chrome when reminders were enabled.
-2. **Stale cached code after a deploy**: the old service worker could serve outdated files.
-
-**Fixes:**
-
-| Fix | File |
-|---|---|
-| App-wide, per-page and per-form **error boundaries** with *Try again / Dashboard* buttons; they reset automatically when you navigate | `components/ErrorBoundary.tsx`, `App.tsx` |
-| Pages **lazy-loaded** with a loading spinner; if a page file is missing after a new deploy, retry once and then reload once automatically | `lib/lazy.ts` |
-| Notifications go through the service worker (`showNotification`) inside `try/catch`, so they can never crash the app | `App.tsx` |
-| Service worker is **network-first** (always fresh code online, cached copy only offline); never touches Firebase requests | `public/sw.js` |
-| Loading screens for sign-in and first data load; a failed data listener shows a banner with **Retry** instead of hanging | `App.tsx`, `useSession.ts`, `Layout.tsx` |
-| `HashRouter`: direct links (e.g. `#/loans`), refresh and back/forward work on GitHub Pages | `App.tsx` |
-
-**Edge fix (Oct 2026):** newer Edge/Chromium versions return a Promise from `window.scrollTo`. An effect written as `useEffect(() => window.scrollTo(0, 0), …)` implicitly returned it, so React tried to call it as a cleanup on the next route change ("u is not a function"). All effects now use a block body. This was reproduced and verified fixed by simulating that browser behaviour.
-
-**Verified:** 30+ consecutive menu clicks, back/forward, and opening every route directly, on mobile and desktop, with zero console errors and no blank screens.
-
----
-
-## 17. Deployment (GitHub Pages)
-
-### 17.1 Workflows
-
-| Workflow | Trigger | Steps |
+| Workflow | Trigger | Does |
 |---|---|---|
-| `ci.yml` | Every push / pull request | `npm ci` → `npm test` → `npm run build` |
-| `deploy.yml` | Push to `main` or manual *Run workflow* | install → test → build (with Firebase variables) → upload → deploy to Pages |
+| `ci.yml` | Every push | install → test → build |
+| `deploy.yml` | Push to `main` / manual run | install → test → build → publish to Pages |
 
-### 17.2 One-time GitHub settings (already done)
+One-time settings (done): Pages source = **GitHub Actions**; default branch = **main**; Environments → github-pages → Deployment branches = **No restriction**.
 
-1. *Settings → Pages → Source:* **GitHub Actions** ✅
-2. *Settings → General → Default branch:* **main** ✅
-3. *Settings → Environments → github-pages → Deployment branches:* **No restriction** ✅
-
-### 17.3 Updating the live site
-
-Any change merged or pushed to `main` publishes automatically in about 1–2 minutes. To re-publish manually: *Actions → Deploy to GitHub Pages → Run workflow → main*.
+Every push to `main` goes live in about 1–2 minutes. Afterwards, refresh with **Ctrl + Shift + R**.
 
 ---
 
-## 18. Step-by-step: enable login with Firebase
-
-Until this is done, the live site runs in **device-only mode** (no login, data stays in that browser).
-The Firebase project belongs to **your** Google account. Nobody else has access unless you add them.
-
-### Step 1: Create the project
-1. Open **https://console.firebase.google.com** and sign in with your Google account.
-2. Click **Create a project** → name it e.g. `paisa-ledger` → Google Analytics **off** → **Create**.
-
-### Step 2: Register the web app
-1. On the project home, click the **`</>` (Web)** icon.
-2. Nickname: `Paisa Ledger` → **Register app** (leave "Firebase Hosting" unticked).
-3. You'll see a `firebaseConfig` block like this. **Keep this page open**:
-   ```js
-   const firebaseConfig = {
-     apiKey: "AIza…",
-     authDomain: "paisa-ledger.firebaseapp.com",
-     projectId: "paisa-ledger",
-     storageBucket: "paisa-ledger.appspot.com",
-     messagingSenderId: "1234567890",
-     appId: "1:1234567890:web:abc123"
-   };
-   ```
-   You can find it again later in *Project settings (⚙️) → General → Your apps*.
-
-### Step 3: Turn on sign-in methods
-1. Left menu: **Build → Authentication → Get started**.
-2. **Sign-in method** tab:
-   - **Google** → Enable → choose your support email → **Save**.
-   - **Phone** → Enable → **Save**.
-     - Real SMS OTP requires the **Blaze (pay-as-you-go)** plan (*⚙️ → Usage and billing*). It includes a free monthly allowance, and you can set a budget alert.
-     - On the free *Spark* plan, use Google sign-in, or add **test phone numbers** (with a fixed code) under *Phone → Phone numbers for testing*.
-
-### Step 4: Authorise your website
-**Authentication → Settings → Authorised domains → Add domain** → `hemanthkumar1198.github.io` → **Add**.
-
-### Step 5: Create the database
-1. **Build → Firestore Database → Create database**.
-2. Location: **asia-south1 (Mumbai)** (can't be changed later).
-3. Start in **production mode** → **Create**.
-
-### Step 6: Add the security rules
-1. Firestore → **Rules** tab.
-2. Delete everything there, then paste the full contents of [`firestore.rules`](../firestore.rules) from this repository.
-3. Click **Publish**.
-
-### Step 7: Give the values to GitHub
-1. Open **https://github.com/Hemanthkumar1198/App_creation/settings/variables/actions**
-   (*Settings → Secrets and variables → Actions → **Variables** tab*).
-2. Click **New repository variable** six times:
-
-| Name | Value (from Step 2) |
-|---|---|
-| `VITE_FIREBASE_API_KEY` | `apiKey` |
-| `VITE_FIREBASE_AUTH_DOMAIN` | `authDomain` |
-| `VITE_FIREBASE_PROJECT_ID` | `projectId` |
-| `VITE_FIREBASE_STORAGE_BUCKET` | `storageBucket` |
-| `VITE_FIREBASE_MESSAGING_SENDER_ID` | `messagingSenderId` |
-| `VITE_FIREBASE_APP_ID` | `appId` |
-
-Paste the values **without quotes**. They are public identifiers (not passwords); your data is protected by the Step 6 rules.
-
-### Step 8: Publish
-**Actions → Deploy to GitHub Pages → Run workflow → main**. When it's green, open the site: you'll see the **sign-in screen**.
-
-### Step 9: First sign-in
-1. Sign in with Google or your mobile number.
-2. If this browser already had data, choose **Upload** to move it into your account.
-3. Optional: *Settings → Account & security* → link the other sign-in method.
-
-### Optional extras
-- **Budget alert:** Google Cloud console → *Billing → Budgets & alerts* (if on Blaze).
-- **Point-in-time recovery / scheduled backups:** Firestore → *Disaster recovery*. Optional, under your control, and off by default.
-
----
-
-## 19. Testing
-
-### 19.1 Unit tests (`npm test`): 30 tests
-
-- **`finance.test.ts` (20):** rounding, simple/compound/monthly/yearly interest, month counting, both spec examples, manual end date, reducing balance after repayment, fully paid, overdue, fixed interest, mark-paid write-off, interest-first split, missed instalment, portfolio totals.
-- **`importers.test.ts` (10):** CSV parsing, Indian amounts, many date formats, header detection & column mapping for bank statements and loan sheets, debit/credit/type/sign handling, duplicate detection, loan import with repayment (Ravi example), PDF row/column reconstruction.
-
-### 19.2 End-to-end tests (Playwright + Firebase emulators)
-
-Run against the real Firebase Auth & Firestore emulators with the production security rules. All passed:
-
-- Login page shown when signed out → phone OTP sign-in.
-- Add expense/income → success only after server acknowledgement → document present in Firestore.
-- Triple-click Save → exactly one record.
-- Add loan → over-repayment blocked → ₹5,000 repayment → *Partially Paid*.
-- Dashboard balance excludes loans.
-- Refresh keeps session & data.
-- 15 menu clicks × 3 rounds, back/forward, direct routes → never blank.
-- Import CSV bank statement (3 ready / 1 duplicate / 1 error), Excel loans (auto-detected), PDF expenses.
-- Export Excel/CSV/PDF downloads; Excel has the 6 separate section sheets.
-- Second browser, same login → same data.
-- Another user → **403**, signed-out → **403**, negative amount → **403**.
-- Sign out → back to login.
-
----
-
-## 20. Local development
+## 29. Local development
 
 ```bash
 git clone https://github.com/Hemanthkumar1198/App_creation.git
 cd App_creation
 npm install
-npm run dev          # http://localhost:5173  (device-only mode)
-npm test             # unit tests
-npm run build        # production build → dist/
+npm run dev        # http://localhost:5173 (uses the real Firebase project)
+npm test           # unit tests
+npm run build      # production build → dist/
 ```
 
-To use Firebase locally, copy `.env.example` to `.env.local` and fill in the 6 values (`.env.local` is git-ignored).
-
-Testing against emulators (no real project needed):
+Emulator testing (no real data touched):
 ```bash
 npx firebase-tools emulators:start --project demo-paisa --only auth,firestore
 VITE_FIREBASE_API_KEY=x VITE_FIREBASE_PROJECT_ID=demo-paisa VITE_FIREBASE_APP_ID=x \
 VITE_FIREBASE_EMULATOR=true npm run dev
 ```
-OTP codes appear in the emulator output.
 
 ---
 
-## 21. Troubleshooting
+## 30. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Site still has no login after setup | Check all 6 variables (names exact, no quotes), then re-run **Deploy to GitHub Pages** |
-| *"This website is not authorised for sign-in"* | Add `hemanthkumar1198.github.io` in Authentication → Settings → Authorised domains |
-| *"This sign-in method is not enabled"* | Enable Google / Phone in Authentication → Sign-in method |
-| *"Phone OTP needs the Blaze plan"* | Upgrade to Blaze, use test numbers, or use Google sign-in |
-| Stuck on "Loading your data…" or *Permission denied* banner | Firestore not created, or rules not published (Steps 5–6) |
-| Google popup closes/blocked on phone | The app automatically switches to redirect sign-in; allow pop-ups if asked |
-| Signed in with phone and data is "missing" | You may have used Google before. Sign in with that method and link both (Settings → Account & security) |
-| Deploy fails: *"Branch main is not allowed to deploy…"* | Settings → Environments → github-pages → Deployment branches → **No restriction** |
-| Page looks outdated after an update | Refresh once; the network-first service worker loads the newest version |
-| PDF import finds no rows | It's a scanned image PDF; download the statement as Excel/CSV instead |
-| `.xls` file rejected | Open in Excel/Google Sheets and save as `.xlsx` or `.csv` |
+| Old version still showing | **Ctrl + Shift + R**; the installed app updates on the next open |
+| Banner: *"…need the updated database rules"* | Re-publish `firestore.rules` (section 27) |
+| *Permission denied* | Rules incomplete: copy the whole file again and Publish |
+| *This website is not authorised for sign-in* | Add `hemanthkumar1198.github.io` in Authentication → Settings → Authorised domains |
+| *Phone OTP needs the Blaze plan* | Use Google sign-in, or upgrade to Blaze |
+| Data "missing" after signing in | You may have used the other sign-in method; sign in with the original one and link both in Settings |
+| Deleted something by mistake | Settings → Trash → Restore (or Undo right after) |
+| Deploy fails: *branch not allowed* | Settings → Environments → github-pages → Deployment branches → No restriction |
+| PDF import finds nothing | Scanned PDF: use the bank's Excel/CSV download |
 
 ---
 
-## 22. Known limitations
+## 31. Known limitations
 
-- **Phone OTP SMS** needs the Firebase **Blaze** plan (with a free allowance); Google sign-in is free.
-- **Scanned PDFs** (images) can't be read without OCR; text-based PDFs work.
-- **Old `.xls`** format isn't supported (use `.xlsx` / `.csv`).
-- Google and phone logins are separate accounts until **linked** in Settings.
-- Device-only mode (no Firebase) keeps data only in that browser; set up Firebase for multi-device storage.
-- Browser notifications appear when the app is opened. There are no background push messages while the app is closed.
+- Phone OTP needs the Firebase Blaze plan (Google sign-in is free).
+- Scanned (image) PDFs and old `.xls` files can't be imported.
+- Google and phone logins are separate accounts until linked.
+- Notifications appear when the app is opened (no background push while closed).
+- Deleting the Firebase project or losing the Google account is outside the app's protection; keep backups.
 
 ---
 
-## 23. Everyday user guide
+## 32. Change log
 
-| I want to… | Do this |
+| Date | Change |
 |---|---|
-| Add an expense | Dashboard → **− Cash Out** → amount → category → **Save** |
-| Add income | Dashboard → **+ Cash In** → amount → category → **Save** |
-| Edit / delete an entry | Transactions → tap the entry → edit or 🗑 (restorable from Trash) |
-| Lend money to someone | **Add Loan** → name, phone, amount, date, rate, due date → **Add loan** |
-| Record a repayment | Loans → borrower → **Add Repayment** (interest is taken first automatically) |
-| Close a loan | Loan details → **Mark as Fully Repaid** (optionally records the final settlement) |
-| Remind a borrower | Loan details → **Send Reminder** → WhatsApp / SMS / Call |
-| See monthly totals | **Transactions → Monthly books** → tap a month for its full details |
-| Note interest a borrower paid | Loans → **Interest** on their row (or Loan details → **Receive Interest**) |
-| Bring in old records | **Import data** → choose file → check mapping & preview → **Import** |
-| Get a report file | Reports → **Excel / CSV / PDF** |
-| Keep a personal copy | Settings → **Full backup (.json)** |
-| Restore a deleted item | Settings → **Trash → Restore** |
-| Use on phone like an app | Open the site → browser menu → **Add to Home Screen** |
-| Switch dark/light | Moon/sun icon at the top, or Settings → Theme |
+| 01 Oct 2026 | v1: dashboard, transactions, loans with interest engine, repayments, reports, search, reminders, import/export, PWA, sample data |
+| 01 Oct 2026 | v2: Google/phone login, Firestore storage, security rules, offline sync, error boundaries, loans kept separate, Excel/CSV/PDF import with preview, multi-sheet exports |
+| 02 Oct 2026 | Connected Firebase project `paisa-ledger-cb5d7`; fixed Edge "u is not a function" crash |
+| 02 Oct 2026 | Receive Interest with history and next due; all-borrowers list with edit; Monthly books with day-wise month view |
+| 02 Oct 2026 | Data safety: no permanent deletes (server-enforced), version history; installable offline app (precache, icons, Install button); separate Cash In / Cash Out books |
+| 02 Oct 2026 | Calculation Notes and Investments & Insurance; "Loans" renamed to **Interest Calculation**; phone menu Home · Cashbook · Interest · Notes · More |
+| 02 Oct 2026 | Notes & Investments made fully flexible: unlimited records, any name/type, optional amount, entries grouped by month |
