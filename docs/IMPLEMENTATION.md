@@ -312,14 +312,22 @@ User taps Save
 | Feature | Detail |
 |---|---|
 | Confirmation dialogs | Before every delete |
-| **Trash** | Deleted transactions & loans go to *Settings → Trash* and can be restored |
+| **No permanent deletes, ever** | The app has no "delete forever" action. Delete = move to Trash, kept forever. *Clear* moves everything to Trash. The database rules deny every delete (server-enforced) |
+| **Version history** | Before any change, the previous version of the record is saved to `users/{uid}/history`, append-only: it can't be edited or removed |
+| **Trash** | Deleted transactions & loans go to *Settings → Trash* and can always be restored |
 | **Undo** | Toast with *Undo* right after deleting |
-| Type-to-confirm | *Erase all data* requires typing `DELETE`; replacing data with demo data requires `DEMO` |
+| Type-to-confirm | *Clear (move all to Trash)* requires typing `TRASH`; loading demo data requires `DEMO` (old data goes to Trash) |
 | Activity history | Every change logged (append-only in the cloud) |
 | Daily snapshot | Device-only mode keeps one automatic snapshot per day in the browser |
 | Manual backup | JSON / Excel / CSV / PDF download any time |
 
 ---
+
+### 8.4 Install & offline
+
+- **Installable app (PWA):** manifest with PNG icons (192/512/maskable), standalone display. Use *Settings → Install app & offline*, the browser's install icon, or *Add to Home Screen* on phones.
+- **Offline:** the service worker downloads every app file at install (from `precache-manifest.json` generated at build), so all pages open without internet. Firestore keeps an offline copy of your data; entries made offline are queued and sync automatically.
+- Verified: reload with no internet → app opens; a never-visited page opens offline; an entry made offline appears in the cloud once back online.
 
 ## 9. Security
 
@@ -331,7 +339,8 @@ These rules run **on Google's servers**, not in the browser, so they can't be by
 - **Transactions** must have: matching `id`, type `income|expense`, amount `> 0` and `≤ 1,00,00,00,00,000`, date in `YYYY-MM-DD`, text fields within length limits.
 - **Loans** must have: borrower name 1–80 chars, principal `> 0`, valid dates with **due date after start date**, rate `≥ 0`, valid interest type/method, ≤ 2000 repayments.
 - **User document** may only contain `settings` and `updatedAt`.
-- **Activity log** is append-only: create and read only, never update or delete.
+- **Activity log** and **version history** are append-only: create and read only, never update or delete.
+- **Nothing can be deleted**: `allow delete: if false` on the user document, transactions, loans, history and activity.
 
 Verified with tests: another signed-in user → **403 denied**; not signed in → **403 denied**; a record with a negative amount → **403 rejected**.
 
@@ -446,7 +455,7 @@ The **end date** is the earliest of: today, the manual *Interest calculation end
 |---|---|
 | **Login** | Continue with Google · Continue with mobile number (OTP) |
 | **Dashboard** | Personal balance; big **+ Cash In / − Cash Out / Add Loan** buttons; personal vs lending cards; Income-vs-Expense and monthly expense charts; lending summary with status counts; upcoming due dates; recent transactions & repayments; spending by category; getting-started card for new accounts |
-| **Monthly books** | Transactions opens on a cashbook-style list of months (e.g. *Sep 2026 expenses* with the total spent and income). Tap a month for its book: spent / income / saved, entries grouped by day with daily totals, *Where the money went* by category, previous/next month, export, and Cash In/Out with that month's date |
+| **Monthly books** | Separate **Cash Out** and **Cash In** books (never netted together). Transactions opens on a cashbook-style list of months (e.g. *Sep 2026 expenses* with the total spent and income). Tap a month for its book: spent / income / saved, entries grouped by day with daily totals, *Where the money went* by category, previous/next month, export, and Cash In/Out with that month's date |
 | **Transactions** | *All entries* tab: search; filter by type, category, payment method, month, date range; sort by date or amount; grouped by month with monthly totals; tap any row to edit or delete; Import and CSV export buttons |
 | **Loans** | Loan dashboard (section 11) |
 | **Loan details** | Section 11 |

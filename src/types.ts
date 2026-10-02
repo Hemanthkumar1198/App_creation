@@ -87,3 +87,12 @@ export interface ActivityEntry {
   entity: 'transaction' | 'loan' | 'repayment' | 'data';
   label: string;
 }
+
+/** Snapshot of a record taken just before it was changed — kept forever (append-only). */
+export interface HistoryEntry {
+  id: string;
+  at: string;
+  entity: 'transaction' | 'loan';
+  docId: string;
+  before: Transaction | Loan;
+}

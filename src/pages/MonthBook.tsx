@@ -1,6 +1,6 @@
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ChevronLeft, ChevronRight, Download, PiggyBank, ReceiptText } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ChevronLeft, ChevronRight, Download, ReceiptText } from 'lucide-react';
 import { useMemo } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { CategoryBars } from '../components/charts/Charts';
 import { TransactionRow } from '../components/Rows';
 import { EmptyState, SectionTitle, StatCard } from '../components/ui/common';
@@ -16,6 +16,9 @@ import { useUI } from '../store/useUI';
 export default function MonthBook() {
   const { ym = todayISO().slice(0, 7) } = useParams();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const kind: 'expense' | 'income' = params.get('book') === 'in' ? 'income' : 'expense';
+  const isIn = kind === 'income';
   const all = useStore((s) => s.transactions);
   const open = useUI((s) => s.open);
   const start = `${ym}-01`;
@@ -24,14 +27,15 @@ export default function MonthBook() {
 
   const data = useMemo(() => {
     const txs = live(all).filter((t) => t.date >= start && t.date <= end);
+    const shown = txs.filter((t) => t.type === kind);
     const days = new Map<string, typeof txs>();
-    for (const t of [...txs].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))) {
+    for (const t of [...shown].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))) {
       days.set(t.date, [...(days.get(t.date) ?? []), t]);
     }
-    return { txs, totals: txTotals(txs, start, end), cats: categoryBreakdown(txs, 'expense', start, end), days: [...days.entries()] };
-  }, [all, start, end]);
+    return { txs, shown, totals: txTotals(txs, start, end), cats: categoryBreakdown(txs, kind, start, end), days: [...days.entries()] };
+  }, [all, start, end, kind]);
 
-  const go = (delta: number) => navigate(`/transactions/month/${addMonths(start, delta).slice(0, 7)}`);
+  const go = (delta: number) => navigate(`/transactions/month/${addMonths(start, delta).slice(0, 7)}${isIn ? '?book=in' : ''}`);
   const defaultDate = ym === today.slice(0, 7) ? today : end < today ? end : start;
 
   return (
@@ -63,15 +67,19 @@ export default function MonthBook() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard compact label="Spent" value={data.totals.expense} icon={ArrowUpRight} tone="expense" />
-        <StatCard compact label="Income" value={data.totals.income} icon={ArrowDownLeft} tone="income" />
-        <StatCard compact label="Saved" value={data.totals.net} icon={PiggyBank} tone={data.totals.net >= 0 ? 'income' : 'expense'} />
+      {/* Cash In and Cash Out are kept as separate books with separate totals. */}
+      <div className="grid grid-cols-2 gap-3">
+        <button className={`rounded-2xl text-left ring-2 transition ${!isIn ? 'ring-rose-400' : 'ring-transparent'}`} onClick={() => setParams({}, { replace: true })}>
+          <StatCard compact label="Cash Out (spent)" value={data.totals.expense} icon={ArrowUpRight} tone="expense" hint={`${data.txs.filter((t) => t.type === 'expense').length} entries`} />
+        </button>
+        <button className={`rounded-2xl text-left ring-2 transition ${isIn ? 'ring-emerald-400' : 'ring-transparent'}`} onClick={() => setParams({ book: 'in' }, { replace: true })}>
+          <StatCard compact label="Cash In (received)" value={data.totals.income} icon={ArrowDownLeft} tone="income" hint={`${data.txs.filter((t) => t.type === 'income').length} entries`} />
+        </button>
       </div>
 
-      {data.txs.length === 0 ? (
+      {data.shown.length === 0 ? (
         <div className="card">
-          <EmptyState icon={ReceiptText} title={`No entries in ${formatMonth(ym)}`} message="Add income or expenses for this month." />
+          <EmptyState icon={ReceiptText} title={`No ${isIn ? 'cash in' : 'expenses'} in ${formatMonth(ym)}`} message={`Add ${isIn ? 'money received' : 'money spent'} for this month.`} />
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-5">
@@ -99,7 +107,7 @@ export default function MonthBook() {
           </div>
           <div className="lg:col-span-2">
             <div className="card card-pad lg:sticky lg:top-20">
-              <SectionTitle title="Where the money went" subtitle={`${data.txs.filter((t) => t.type === 'expense').length} expenses`} />
+              <SectionTitle title={isIn ? 'Where the money came from' : 'Where the money went'} subtitle={`${data.shown.length} ${isIn ? 'cash in' : 'expense'} entries`} />
               <CategoryBars data={data.cats} max={8} />
             </div>
           </div>

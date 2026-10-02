@@ -44,24 +44,38 @@ service cloud.firestore {
         && isText(d.notes, 1000);
     }
 
+    // DATA SAFETY: nothing under a user can ever be deleted (delete is always denied).
+    // Records are soft-deleted (moved to Trash) and every change keeps the previous version in /history.
     match /users/{uid} {
-      allow read, delete: if isOwner(uid);
+      allow read: if isOwner(uid);
       allow create, update: if isOwner(uid) && request.resource.data.keys().hasOnly(['settings', 'updatedAt']);
+      allow delete: if false;
 
       match /transactions/{id} {
-        allow read, delete: if isOwner(uid);
+        allow read: if isOwner(uid);
         allow create, update: if isOwner(uid) && validTransaction(id);
+        allow delete: if false;
       }
 
       match /loans/{id} {
-        allow read, delete: if isOwner(uid);
+        allow read: if isOwner(uid);
         allow create, update: if isOwner(uid) && validLoan(id);
+        allow delete: if false;
+      }
+
+      // Append-only version history: previous copies of edited/deleted records. Never editable or removable.
+      match /history/{id} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && request.resource.data.id == id
+          && request.resource.data.entity in ['transaction', 'loan'];
+        allow update, delete: if false;
       }
 
       // Append-only audit trail: entries can be added but never edited or removed from the app.
       match /activity/{id} {
         allow read: if isOwner(uid);
         allow create: if isOwner(uid) && request.resource.data.id == id && isText(request.resource.data.label, 300);
+        allow update, delete: if false;
       }
     }
 

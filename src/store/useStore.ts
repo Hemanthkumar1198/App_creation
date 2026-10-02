@@ -38,13 +38,11 @@ interface State extends DataSnapshot {
   updateTransaction: (id: string, input: TxInput) => Result;
   deleteTransaction: (id: string) => Result;
   restoreTransaction: (id: string) => Result;
-  purgeTransaction: (id: string) => Result;
 
   addLoan: (input: LoanInput) => Promise<{ id: string; result: CommitResult }>;
   updateLoan: (id: string, input: Partial<LoanInput>) => Result;
   deleteLoan: (id: string) => Result;
   restoreLoan: (id: string) => Result;
-  purgeLoan: (id: string) => Result;
   closeLoan: (id: string, date: string, settlement?: RepaymentInput) => Result;
   reopenLoan: (id: string) => Result;
 
@@ -56,8 +54,8 @@ interface State extends DataSnapshot {
   importRecords: (txs: Transaction[], loans: Loan[], label: string) => Result;
   replaceAll: (data: { transactions: Transaction[]; loans: Loan[]; settings?: Settings }, label: string) => Result;
   loadSampleData: () => Result;
-  clearAllData: () => Result;
-  emptyTrash: () => Result;
+  /** Moves everything to Trash (recoverable). Nothing is ever erased permanently. */
+  moveAllToTrash: () => Result;
 }
 
 let backend: Backend | null = null;
@@ -74,9 +72,23 @@ function activity(entry: Omit<ActivityEntry, 'id' | 'at'>): Op {
   return { kind: 'activity', op: 'put', doc: { ...entry, id: uid(), at: nowISO() } };
 }
 
+/**
+ * Every write goes through here. Before a transaction or loan is changed, its current
+ * version is copied into the append-only history log in the same atomic batch, so no
+ * edit, soft-delete or restore can ever lose information.
+ */
 function commit(ops: Op[]): Result {
   if (!backend) return Promise.reject(new Error('Your data is still loading. Please try again in a moment.'));
-  return backend.commit(ops);
+  const { transactions, loans } = useStore.getState();
+  const history: Op[] = [];
+  const at = nowISO();
+  for (const o of ops) {
+    if (o.kind !== 'tx' && o.kind !== 'loan') continue;
+    const prev = o.kind === 'tx' ? transactions.find((t) => t.id === o.doc.id) : loans.find((l) => l.id === o.doc.id);
+    if (prev && JSON.stringify(prev) !== JSON.stringify(o.doc))
+      history.push({ kind: 'history', op: 'put', doc: { id: uid(), at, entity: o.kind === 'tx' ? 'transaction' : 'loan', docId: prev.id, before: prev } });
+  }
+  return backend.commit([...ops, ...history]);
 }
 
 function assertAmount(n: number, label = 'Amount', allowZero = false) {
@@ -186,10 +198,6 @@ export const useStore = create<State>()((_set, get) => {
       const { deletedAt: _d, ...t } = findTx(id);
       return commit([{ kind: 'tx', op: 'put', doc: t }, activity({ action: 'restored', entity: 'transaction', label: `Restored ${txLabel(t)}` })]);
     },
-    purgeTransaction: async (id) => {
-      const t = findTx(id);
-      return commit([{ kind: 'tx', op: 'delete', id }, activity({ action: 'purged', entity: 'transaction', label: `Permanently deleted ${txLabel(t)}` })]);
-    },
 
     addLoan: async (input) => {
       const l: Loan = { ...input, borrowerName: input.borrowerName.trim(), principal: round2(input.principal), id: uid(), repayments: [], createdAt: nowISO(), updatedAt: nowISO() };
@@ -212,10 +220,6 @@ export const useStore = create<State>()((_set, get) => {
     restoreLoan: async (id) => {
       const { deletedAt: _d, ...l } = findLoan(id);
       return commit([putLoan(l), activity({ action: 'restored', entity: 'loan', label: `Restored loan to ${l.borrowerName}` })]);
-    },
-    purgeLoan: async (id) => {
-      const l = findLoan(id);
-      return commit([{ kind: 'loan', op: 'delete', id }, activity({ action: 'purged', entity: 'loan', label: `Permanently deleted loan to ${l.borrowerName}` })]);
     },
     closeLoan: async (id, date, settlement) => {
       const l = findLoan(id);
@@ -285,8 +289,9 @@ export const useStore = create<State>()((_set, get) => {
       const keepTx = new Set(data.transactions.map((t) => t.id));
       const keepLoan = new Set(data.loans.map((l) => l.id));
       const ops: Op[] = [
-        ...s.transactions.filter((t) => !keepTx.has(t.id)).map((t): Op => ({ kind: 'tx', op: 'delete', id: t.id })),
-        ...s.loans.filter((l) => !keepLoan.has(l.id)).map((l): Op => ({ kind: 'loan', op: 'delete', id: l.id })),
+        // Records not in the incoming data are moved to Trash, never erased.
+        ...s.transactions.filter((t) => !keepTx.has(t.id) && !t.deletedAt).map((t): Op => ({ kind: 'tx', op: 'put', doc: { ...t, deletedAt: nowISO() } })),
+        ...s.loans.filter((l) => !keepLoan.has(l.id) && !l.deletedAt).map((l): Op => ({ kind: 'loan', op: 'put', doc: { ...l, deletedAt: nowISO() } })),
         ...data.transactions.map((doc): Op => ({ kind: 'tx', op: 'put', doc })),
         ...data.loans.map((doc): Op => ({ kind: 'loan', op: 'put', doc: { ...doc, repayments: doc.repayments ?? [] } })),
       ];
@@ -295,13 +300,13 @@ export const useStore = create<State>()((_set, get) => {
       return commit(ops);
     },
     loadSampleData: async () => get().replaceAll(buildSampleData(), 'Loaded sample data'),
-    clearAllData: async () => get().replaceAll({ transactions: [], loans: [] }, 'All data erased'),
-    emptyTrash: async () => {
+    moveAllToTrash: async () => {
       const s = get();
+      const at = nowISO();
       return commit([
-        ...s.transactions.filter((t) => t.deletedAt).map((t): Op => ({ kind: 'tx', op: 'delete', id: t.id })),
-        ...s.loans.filter((l) => l.deletedAt).map((l): Op => ({ kind: 'loan', op: 'delete', id: l.id })),
-        activity({ action: 'purged', entity: 'data', label: 'Trash emptied' }),
+        ...s.transactions.filter((t) => !t.deletedAt).map((t): Op => ({ kind: 'tx', op: 'put', doc: { ...t, deletedAt: at } })),
+        ...s.loans.filter((l) => !l.deletedAt).map((l): Op => ({ kind: 'loan', op: 'put', doc: { ...l, deletedAt: at } })),
+        activity({ action: 'deleted', entity: 'data', label: 'Moved all records to Trash' }),
       ]);
     },
   };

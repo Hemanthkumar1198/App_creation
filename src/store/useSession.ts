@@ -112,7 +112,7 @@ export function startSession() {
 }
 
 function pick(s: DataSnapshot): DataSnapshot {
-  return { transactions: s.transactions, loans: s.loans, activity: s.activity, settings: s.settings };
+  return { transactions: s.transactions, loans: s.loans, activity: s.activity, settings: s.settings, history: s.history };
 }
 
 /* ------------------------------------------------------------- auth actions */

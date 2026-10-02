@@ -20,14 +20,22 @@ type Sort = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc';
 function MonthList() {
   const all = useStore((s) => s.transactions);
   const open = useUI((s) => s.open);
+  const [params, setParams] = useSearchParams();
+  const kind: TxType = params.get('book') === 'in' ? 'income' : 'expense';
+  const isIn = kind === 'income';
   const months = useMemo(() => {
-    const map = new Map<string, { spent: number; income: number; count: number; updated: string }>();
-    map.set(todayISO().slice(0, 7), { spent: 0, income: 0, count: 0, updated: '' });
+    const map = new Map<string, { spent: number; income: number; count: number; inCount: number; outCount: number; updated: string }>();
+    map.set(todayISO().slice(0, 7), { spent: 0, income: 0, count: 0, inCount: 0, outCount: 0, updated: '' });
     for (const t of live(all)) {
       const k = t.date.slice(0, 7);
-      const m = map.get(k) ?? { spent: 0, income: 0, count: 0, updated: '' };
-      if (t.type === 'expense') m.spent += t.amount;
-      else m.income += t.amount;
+      const m = map.get(k) ?? { spent: 0, income: 0, count: 0, inCount: 0, outCount: 0, updated: '' };
+      if (t.type === 'expense') {
+        m.spent += t.amount;
+        m.outCount++;
+      } else {
+        m.income += t.amount;
+        m.inCount++;
+      }
       m.count++;
       const u = (t.updatedAt || t.createdAt || t.date).slice(0, 10);
       if (u > m.updated) m.updated = u;
@@ -40,23 +48,35 @@ function MonthList() {
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-white/5">
         <span className="font-bold">Your books</span>
-        <span className="text-xs text-slate-500 dark:text-slate-400">{months.length} months</span>
+        <Segmented
+          value={kind}
+          onChange={(k) => setParams(k === 'income' ? { book: 'in' } : {}, { replace: true })}
+          options={[
+            { value: 'expense', label: <span className="flex items-center gap-1.5"><ArrowUpRight size={14} /> Cash Out</span> },
+            { value: 'income', label: <span className="flex items-center gap-1.5"><ArrowDownLeft size={14} /> Cash In</span> },
+          ]}
+        />
       </div>
       <div className="divide-y divide-slate-100 dark:divide-white/5">
         {months.map(([ym, m]) => (
-          <Link key={ym} to={`/transactions/month/${ym}`} className="flex items-center gap-3 px-4 py-3.5 transition hover:bg-slate-50 dark:hover:bg-white/5">
+          <Link key={ym} to={`/transactions/month/${ym}${isIn ? '?book=in' : ''}`} className="flex items-center gap-3 px-4 py-3.5 transition hover:bg-slate-50 dark:hover:bg-white/5">
             <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
               <BookOpen size={20} />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="truncate font-semibold">{formatMonth(ym)} expenses</div>
+              <div className="truncate font-semibold">
+                {formatMonth(ym)} {isIn ? 'cash in' : 'expenses'}
+              </div>
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                {m.count ? `${m.count} entries · updated ${formatDate(m.updated)}` : 'No entries yet'}
+                {(isIn ? m.inCount : m.outCount) ? `${isIn ? m.inCount : m.outCount} entries · updated ${formatDate(m.updated)}` : 'No entries yet'}
               </div>
             </div>
             <div className="text-right">
-              <div className="num font-bold text-rose-600 dark:text-rose-400">−{formatINR(round2(m.spent))}</div>
-              {m.income > 0 && <div className="num text-xs font-semibold text-emerald-600 dark:text-emerald-400">+{formatINR(round2(m.income))}</div>}
+              {isIn ? (
+                <div className="num font-bold text-emerald-600 dark:text-emerald-400">+{formatINR(round2(m.income))}</div>
+              ) : (
+                <div className="num font-bold text-rose-600 dark:text-rose-400">−{formatINR(round2(m.spent))}</div>
+              )}
             </div>
             <ChevronRight size={16} className="shrink-0 text-slate-400" />
           </Link>

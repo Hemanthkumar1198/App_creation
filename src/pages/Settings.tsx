@@ -28,6 +28,7 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { ConfirmationResult } from 'firebase/auth';
 import { PageHeader, Segmented } from '../components/ui/common';
+import { InstallCard } from '../components/InstallCard';
 import { formatDate } from '../lib/dates';
 import { downloadJSON, exportData, type ExportFormat } from '../lib/export';
 import { formatINR } from '../lib/format';
@@ -275,6 +276,32 @@ export default function Settings() {
       <div className="grid gap-4 lg:grid-cols-2">
         <AccountSection />
 
+        <Section icon={ShieldCheck} title="Your data is protected" desc="How Paisa Ledger keeps your entries safe for the long term.">
+          <ul className="space-y-2.5 text-sm">
+            {[
+              mode === 'cloud'
+                ? ['Saved to your account', 'Every entry is stored in your own Firebase (Google Cloud) database, which keeps multiple copies. Clearing the browser, a new phone or a new laptop never loses it.']
+                : ['Stored on this device', 'Sign-in is not configured here, so data lives in this browser. Download backups regularly.'],
+              ['Never permanently deleted', 'Delete moves an item to Trash, where it is kept forever and can be restored. The server blocks every permanent delete.'],
+              ['Every change is versioned', 'Before any edit, the previous version is saved to a history that can never be changed or removed.'],
+              ['Private to you', 'Only your login can read or change your records; others are blocked by the database rules.'],
+              ['Works offline', 'Entries made without internet are stored on the device and sync automatically later.'],
+            ].map(([t, d]) => (
+              <li key={t} className="flex gap-2.5">
+                <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span>
+                  <b>{t}.</b> <span className="text-slate-600 dark:text-slate-300">{d}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Extra copy any time: Export & backup → Full backup (.json) or Excel.</p>
+        </Section>
+
+        <Section icon={Smartphone} title="Install app & offline" desc="Use Paisa Ledger like a normal app on your phone or computer.">
+          <InstallCard />
+        </Section>
+
         <Section icon={User} title="Profile & appearance">
           <div className="space-y-4">
             <div>
@@ -386,7 +413,7 @@ export default function Settings() {
           </div>
         </Section>
 
-        <Section icon={Trash2} title={`Trash (${trash.length})`} desc="Deleted transactions and loans are kept here until you remove them permanently.">
+        <Section icon={Trash2} title={`Trash (${trash.length})`} desc="Deleted transactions and loans are kept here forever and can be restored at any time.">
           {trash.length === 0 ? (
             <p className="rounded-2xl bg-slate-50 p-4 text-center text-sm text-slate-500 dark:bg-white/5">Trash is empty.</p>
           ) : (
@@ -401,29 +428,10 @@ export default function Settings() {
                     <button className="btn-ghost px-2.5 py-1.5 text-xs" disabled={saving} onClick={() => run(() => (t.kind === 'loan' ? st.restoreLoan(t.id) : st.restoreTransaction(t.id)), 'Restored')}>
                       <RotateCcw size={14} /> Restore
                     </button>
-                    <button
-                      className="btn-ghost px-2.5 py-1.5 text-xs text-rose-600"
-                      aria-label="Delete permanently"
-                      disabled={saving}
-                      onClick={async () => {
-                        if (await confirm({ title: 'Delete permanently?', message: `${t.label} will be erased forever. This cannot be undone.`, confirmLabel: 'Delete forever', danger: true }))
-                          run(() => (t.kind === 'loan' ? st.purgeLoan(t.id) : st.purgeTransaction(t.id)), 'Deleted permanently');
-                      }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
                   </div>
                 ))}
               </div>
-              <button
-                className="btn-ghost mt-2 text-rose-600"
-                disabled={saving}
-                onClick={async () => {
-                  if (await confirm({ title: 'Empty trash?', message: `${trash.length} item(s) will be erased forever.`, confirmLabel: 'Empty trash', danger: true })) run(st.emptyTrash, 'Trash emptied');
-                }}
-              >
-                Empty trash
-              </button>
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Items in Trash are kept forever and can always be restored.</p>
             </>
           )}
         </Section>
@@ -464,7 +472,7 @@ export default function Settings() {
               className="btn-secondary"
               disabled={saving}
               onClick={async () => {
-                if (await confirm({ title: 'Load demo data?', message: 'This REPLACES your current transactions and loans with demo data. Download a backup first if you want to keep your data.', confirmLabel: 'Replace with demo data', danger: true, typeToConfirm: transactions.length || loans.length ? 'DEMO' : undefined }))
+                if (await confirm({ title: 'Load demo data?', message: 'Your current transactions and loans will be moved to Trash (restorable) and replaced with demo data.', confirmLabel: 'Replace with demo data', danger: true, typeToConfirm: transactions.length || loans.length ? 'DEMO' : undefined }))
                   run(st.loadSampleData, 'Demo data loaded');
               }}
             >
@@ -476,17 +484,17 @@ export default function Settings() {
               onClick={async () => {
                 if (
                   await confirm({
-                    title: 'Erase all data?',
-                    message: `Every transaction, loan and repayment ${mode === 'cloud' ? 'in your account' : 'on this device'} will be erased. This cannot be undone — download a backup first.`,
-                    confirmLabel: 'Erase everything',
+                    title: 'Move everything to Trash?',
+                    message: 'All transactions and loans will be hidden and moved to Trash. Nothing is erased: you can restore any item from Trash at any time.',
+                    confirmLabel: 'Move to Trash',
                     danger: true,
-                    typeToConfirm: 'DELETE',
+                    typeToConfirm: 'TRASH',
                   })
                 )
-                  run(st.clearAllData, 'All data erased');
+                  run(st.moveAllToTrash, 'Everything moved to Trash (restorable)');
               }}
             >
-              <Trash2 size={16} /> Erase all data
+              <Trash2 size={16} /> Clear (move all to Trash)
             </button>
           </div>
         </Section>

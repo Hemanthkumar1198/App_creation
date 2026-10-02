@@ -13,7 +13,7 @@ import type { ActivityEntry, Loan, Settings, Transaction } from '../types';
 import { getFirebase } from '../lib/firebase';
 import { defaultSettings, type Backend, type CommitResult, type DataSnapshot, type Op } from './backend';
 
-const COL = { tx: 'transactions', loan: 'loans', activity: 'activity' } as const;
+const COL = { tx: 'transactions', loan: 'loans', activity: 'activity', history: 'history' } as const;
 
 export interface CloudCallbacks {
   onData: (patch: Partial<DataSnapshot>) => void;
@@ -134,8 +134,6 @@ function writeChunk(db: Firestore, base: string, ops: Op[]) {
   for (const o of ops) {
     if (o.kind === 'settings') {
       batch.set(doc(db, base), { settings: o.doc, updatedAt: new Date().toISOString() }, { merge: true });
-    } else if (o.op === 'delete') {
-      batch.delete(doc(db, base, COL[o.kind], o.id));
     } else {
       batch.set(doc(db, base, COL[o.kind], o.doc.id), stripUndefined(o.doc));
     }
