@@ -449,6 +449,18 @@ The **end date** is the earliest of: today, the manual *Interest calculation end
 
 ---
 
+## 11a. Calculation Notes & Investments/Insurance
+
+**Calculation Notes** (`/notes`) are separate calculation books for one purpose, e.g. *Paddy harvest 2026* or *House construction*. Each has entries marked **Spent** or **Received** (date, what for, amount, notes). The book shows total spent, total received, profit/net cost, and a "spent on" breakdown grouped by description (e.g. Labour ₹5,500), with CSV export. Notes are **not** counted in daily income/expenses. Stored in `users/{uid}/notes/{id}` with entries embedded.
+
+**Investments & Insurance** (`/investments`) tracks SIP, mutual funds, LIC, term/health/vehicle insurance, PPF, FD/RD and gold. Each plan has a type, provider, instalment/premium, frequency, start/end date, policy/folio number, cover/target and notes, plus a payment history. **Next due** = last payment + one period (or the start date before the first payment). The page shows paid this year, invested vs premiums (all time), yearly commitment, and payments due in the next 30 days with a **Pay** button. Due and overdue payments appear under the 🔔 bell. Stored in `users/{uid}/plans/{id}`.
+
+Both use the same safety model: soft delete to Trash, version history, and no deletes allowed by the rules. Both are exported as their own sections.
+
+**Naming:** the lending section is labelled **Interest Calculation** (menu: *Interest*). Phone bottom bar: Home · Cashbook · Interest · Notes · More (Investments, Reports, Import, Search, Settings).
+
+> **After this update, re-publish `firestore.rules`** (Firebase → Firestore → Rules → paste → Publish). The new `notes` and `plans` collections are only allowed by the updated rules.
+
 ## 12. Pages & features
 
 | Page | Highlights |

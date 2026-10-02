@@ -6,6 +6,7 @@ import { Layout, useIsDark, useReminders } from './components/Layout';
 import { CloseLoanForm, ReminderSheet } from './components/forms/LoanActions';
 import { LoanForm } from './components/forms/LoanForm';
 import { InterestForm } from './components/forms/InterestForm';
+import { NoteEntryForm, NoteForm, PlanForm, PlanPaymentForm } from './components/forms/NotesPlansForms';
 import { RepaymentForm } from './components/forms/RepaymentForm';
 import { TransactionForm } from './components/forms/TransactionForm';
 import { ConfirmHost, Toaster } from './components/ui/Overlays';
@@ -25,6 +26,11 @@ const Search = lazyPage(() => import('./pages/Search'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const ImportData = lazyPage(() => import('./pages/Import'));
 const MonthBook = lazyPage(() => import('./pages/MonthBook'));
+const Notes = lazyPage(() => import('./pages/Notes'));
+const NoteDetail = lazyPage(() => import('./pages/NoteDetail'));
+const Investments = lazyPage(() => import('./pages/Investments'));
+const PlanDetail = lazyPage(() => import('./pages/PlanDetail'));
+const More = lazyPage(() => import('./pages/More'));
 
 function SheetHost() {
   const sheet = useUI((s) => s.sheet);
@@ -40,6 +46,14 @@ function SheetHost() {
         return <RepaymentForm key={sheet.editId ?? 'new'} loanId={sheet.loanId} editId={sheet.editId} onClose={close} />;
       case 'interest':
         return <InterestForm loanId={sheet.loanId} onClose={close} />;
+      case 'note':
+        return <NoteForm key={sheet.editId ?? 'new'} editId={sheet.editId} onClose={close} />;
+      case 'note-entry':
+        return <NoteEntryForm key={sheet.editId ?? 'new'} noteId={sheet.noteId} editId={sheet.editId} entryType={sheet.entryType} onClose={close} />;
+      case 'plan':
+        return <PlanForm key={sheet.editId ?? 'new'} editId={sheet.editId} onClose={close} />;
+      case 'plan-payment':
+        return <PlanPaymentForm key={sheet.editId ?? 'new'} planId={sheet.planId} editId={sheet.editId} onClose={close} />;
       case 'close-loan':
         return <CloseLoanForm loanId={sheet.loanId} onClose={close} />;
       case 'reminder':
@@ -134,7 +148,7 @@ function MigrationPrompt() {
             onClick={async () => {
               setBusy(true);
               try {
-                await replaceAll({ transactions: offer.transactions, loans: offer.loans, settings: offer.settings }, 'Uploaded data from this device');
+                await replaceAll({ transactions: offer.transactions, loans: offer.loans, notes: offer.notes, plans: offer.plans, settings: offer.settings }, 'Uploaded data from this device');
                 dismiss();
                 toast('Your data is now saved to your account');
               } catch (e) {
@@ -164,6 +178,11 @@ function RoutedApp() {
             <Route path="/transactions/month/:ym" element={<MonthBook />} />
             <Route path="/loans" element={<Loans />} />
             <Route path="/loans/:id" element={<LoanDetail />} />
+            <Route path="/notes" element={<Notes />} />
+            <Route path="/notes/:id" element={<NoteDetail />} />
+            <Route path="/investments" element={<Investments />} />
+            <Route path="/investments/:id" element={<PlanDetail />} />
+            <Route path="/more" element={<More />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/search" element={<Search />} />
             <Route path="/import" element={<ImportData />} />

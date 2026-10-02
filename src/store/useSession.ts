@@ -66,7 +66,7 @@ function toSessionUser(u: User): SessionUser {
   };
 }
 
-const empty: DataSnapshot = { transactions: [], loans: [], activity: [], settings: defaultSettings };
+const empty: DataSnapshot = { transactions: [], loans: [], notes: [], plans: [], activity: [], settings: defaultSettings };
 
 let started = false;
 
@@ -112,7 +112,7 @@ export function startSession() {
 }
 
 function pick(s: DataSnapshot): DataSnapshot {
-  return { transactions: s.transactions, loans: s.loans, activity: s.activity, settings: s.settings, history: s.history };
+  return { transactions: s.transactions, loans: s.loans, notes: s.notes, plans: s.plans, activity: s.activity, settings: s.settings, history: s.history };
 }
 
 /* ------------------------------------------------------------- auth actions */

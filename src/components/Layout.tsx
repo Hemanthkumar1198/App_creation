@@ -23,6 +23,9 @@ import {
   HardDrive,
   FileUp,
   ShieldCheck,
+  NotebookPen,
+  TrendingUp,
+  Menu,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -36,9 +39,20 @@ import { todayISO } from '../lib/dates';
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/transactions', label: 'Transactions', icon: ReceiptText },
-  { to: '/loans', label: 'Loans', icon: HandCoins },
+  { to: '/loans', label: 'Interest Calculation', short: 'Interest', icon: HandCoins },
+  { to: '/notes', label: 'Calculation Notes', short: 'Notes', icon: NotebookPen },
+  { to: '/investments', label: 'Investments & Insurance', short: 'Invest', icon: TrendingUp },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
+];
+
+/** Phone bottom bar: the four most-used sections + "More". */
+const MOBILE_NAV = [
+  { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
+  { to: '/transactions', label: 'Cashbook', icon: ReceiptText },
+  { to: '/loans', label: 'Interest', icon: HandCoins },
+  { to: '/notes', label: 'Notes', icon: NotebookPen },
+  { to: '/more', label: 'More', icon: Menu },
 ];
 
 export function useIsDark() {
@@ -102,8 +116,9 @@ const REMINDER_ICON: Record<Reminder['kind'], { icon: typeof Bell; cls: string }
 export function useReminders() {
   const loans = useStore((s) => s.loans);
   const txs = useStore((s) => s.transactions);
+  const plans = useStore((s) => s.plans);
   const days = useStore((s) => s.settings.reminderDays);
-  return useMemo(() => buildReminders(loans, txs, days, todayISO()), [loans, txs, days]);
+  return useMemo(() => buildReminders(loans, txs, days, todayISO(), plans), [loans, txs, days, plans]);
 }
 
 function Notifications() {
@@ -140,7 +155,7 @@ function Notifications() {
                   className="flex w-full gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-white/5"
                   onClick={() => {
                     setOpen(false);
-                    navigate(r.loanId ? `/loans/${r.loanId}` : '/reports');
+                    navigate(r.loanId ? `/loans/${r.loanId}` : r.planId ? `/investments/${r.planId}` : '/reports');
                   }}
                 >
                   <span className={clsx('grid h-9 w-9 shrink-0 place-items-center rounded-xl', I.cls)}>
@@ -246,7 +261,8 @@ function Fab() {
           {[
             { label: 'Cash In', icon: ArrowDownLeft, cls: 'bg-emerald-600', run: () => openSheet({ kind: 'tx', txType: 'income' }) },
             { label: 'Cash Out', icon: ArrowUpRight, cls: 'bg-rose-600', run: () => openSheet({ kind: 'tx', txType: 'expense' }) },
-            { label: 'Add Loan', icon: HandCoins, cls: 'bg-violet-600', run: () => openSheet({ kind: 'loan' }) },
+            { label: 'Interest record', icon: HandCoins, cls: 'bg-violet-600', run: () => openSheet({ kind: 'loan' }) },
+            { label: 'Calculation note', icon: NotebookPen, cls: 'bg-orange-500', run: () => (window.location.hash = '#/notes') },
           ].map((a) => (
             <button key={a.label} onClick={() => go(a.run)} className="animate-slide-up flex items-center gap-2 rounded-full bg-white py-1.5 pl-4 pr-1.5 text-sm font-semibold shadow-lg dark:bg-ink-800">
               {a.label}
@@ -361,7 +377,7 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* Mobile bottom nav */}
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-slate-200/70 bg-white/95 backdrop-blur-xl dark:border-white/5 dark:bg-ink-900/95 lg:hidden">
         <div className="mx-auto grid max-w-lg grid-cols-5">
-          {NAV.map((n) => (
+          {MOBILE_NAV.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}

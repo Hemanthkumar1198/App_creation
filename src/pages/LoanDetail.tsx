@@ -67,10 +67,10 @@ export default function LoanDetail() {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
         <Link to="/loans" className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white">
-          <ArrowLeft size={16} /> All loans
+          <ArrowLeft size={16} /> All interest records
         </Link>
         <button className="btn-primary py-2" onClick={() => open({ kind: 'loan' })}>
-          <UserPlus size={16} /> New loan (another person)
+          <UserPlus size={16} /> Add another person
         </button>
       </div>
 

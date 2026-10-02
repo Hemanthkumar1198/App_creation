@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ActivityEntry, Loan, Repayment, Settings, Transaction } from '../types';
+import type { ActivityEntry, CalcNote, Loan, NoteEntry, Plan, PlanPayment, Repayment, Settings, Transaction } from '../types';
 import { buildSampleData } from '../data/sample';
 import { round2 } from '../lib/finance';
 import { formatINR, uid } from '../lib/format';
@@ -13,6 +13,9 @@ export const THEME_KEY = 'paisa-ledger:theme';
 export type TxInput = Omit<Transaction, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
 export type LoanInput = Omit<Loan, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'repayments' | 'closedAt'>;
 export type RepaymentInput = Omit<Repayment, 'id' | 'createdAt'>;
+export type NoteEntryInput = Omit<NoteEntry, 'id' | 'createdAt'>;
+export type PlanInput = Omit<Plan, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'payments'>;
+export type PlanPaymentInput = Omit<PlanPayment, 'id' | 'createdAt'>;
 
 export interface BackupFile {
   app: 'paisa-ledger';
@@ -20,6 +23,8 @@ export interface BackupFile {
   exportedAt: string;
   transactions: Transaction[];
   loans: Loan[];
+  notes?: CalcNote[];
+  plans?: Plan[];
   settings: Settings;
 }
 
@@ -52,10 +57,26 @@ interface State extends DataSnapshot {
 
   updateSettings: (s: Partial<Settings>) => Result;
   importRecords: (txs: Transaction[], loans: Loan[], label: string) => Result;
-  replaceAll: (data: { transactions: Transaction[]; loans: Loan[]; settings?: Settings }, label: string) => Result;
+  replaceAll: (data: { transactions: Transaction[]; loans: Loan[]; notes?: CalcNote[]; plans?: Plan[]; settings?: Settings }, label: string) => Result;
   loadSampleData: () => Result;
   /** Moves everything to Trash (recoverable). Nothing is ever erased permanently. */
   moveAllToTrash: () => Result;
+
+  addNote: (name: string, description: string) => Promise<{ id: string; result: CommitResult }>;
+  updateNote: (id: string, patch: { name: string; description: string }) => Result;
+  deleteNote: (id: string) => Result;
+  restoreNote: (id: string) => Result;
+  addNoteEntry: (noteId: string, input: NoteEntryInput) => Result;
+  updateNoteEntry: (noteId: string, entryId: string, input: NoteEntryInput) => Result;
+  deleteNoteEntry: (noteId: string, entryId: string) => Result;
+
+  addPlan: (input: PlanInput) => Promise<{ id: string; result: CommitResult }>;
+  updatePlan: (id: string, input: PlanInput) => Result;
+  deletePlan: (id: string) => Result;
+  restorePlan: (id: string) => Result;
+  addPlanPayment: (planId: string, input: PlanPaymentInput) => Result;
+  updatePlanPayment: (planId: string, paymentId: string, input: PlanPaymentInput) => Result;
+  deletePlanPayment: (planId: string, paymentId: string) => Result;
 }
 
 let backend: Backend | null = null;
@@ -79,14 +100,16 @@ function activity(entry: Omit<ActivityEntry, 'id' | 'at'>): Op {
  */
 function commit(ops: Op[]): Result {
   if (!backend) return Promise.reject(new Error('Your data is still loading. Please try again in a moment.'));
-  const { transactions, loans } = useStore.getState();
+  const { transactions, loans, notes, plans } = useStore.getState();
   const history: Op[] = [];
   const at = nowISO();
+  const lists = { tx: transactions, loan: loans, note: notes, plan: plans } as const;
+  const entity = { tx: 'transaction', loan: 'loan', note: 'note', plan: 'plan' } as const;
   for (const o of ops) {
-    if (o.kind !== 'tx' && o.kind !== 'loan') continue;
-    const prev = o.kind === 'tx' ? transactions.find((t) => t.id === o.doc.id) : loans.find((l) => l.id === o.doc.id);
+    if (o.kind !== 'tx' && o.kind !== 'loan' && o.kind !== 'note' && o.kind !== 'plan') continue;
+    const prev = (lists[o.kind] as { id: string }[]).find((x) => x.id === o.doc.id) as Transaction | Loan | CalcNote | Plan | undefined;
     if (prev && JSON.stringify(prev) !== JSON.stringify(o.doc))
-      history.push({ kind: 'history', op: 'put', doc: { id: uid(), at, entity: o.kind === 'tx' ? 'transaction' : 'loan', docId: prev.id, before: prev } });
+      history.push({ kind: 'history', op: 'put', doc: { id: uid(), at, entity: entity[o.kind], docId: prev.id, before: prev } });
   }
   return backend.commit([...ops, ...history]);
 }
@@ -122,6 +145,43 @@ function validateLoan(l: Loan) {
   if (l.dueDate <= l.startDate) throw new ValidationError('Due date must be after the start date');
   if (!Number.isFinite(l.interestRate) || l.interestRate < 0) throw new ValidationError('Interest rate cannot be negative');
   if (l.interestType !== 'fixed' && l.interestRate > 100) throw new ValidationError('Interest rate looks too high (max 100%)');
+}
+
+function cleanEntry(input: NoteEntryInput): NoteEntryInput {
+  const amount = round2(input.amount);
+  assertAmount(amount);
+  assertDate(input.date);
+  if (input.type !== 'in' && input.type !== 'out') throw new ValidationError('Choose spent or received');
+  return { ...input, amount, description: input.description.trim().slice(0, 200), notes: input.notes.trim().slice(0, 1000) };
+}
+
+function cleanPlan(input: PlanInput): PlanInput {
+  if (!input.name.trim()) throw new ValidationError('Enter a name, e.g. "HDFC Index Fund SIP" or "LIC Jeevan Anand"');
+  const amount = round2(input.amount);
+  assertAmount(amount, 'Instalment amount');
+  assertDate(input.startDate, 'Start date');
+  if (input.endDate) {
+    assertDate(input.endDate, 'End date');
+    if (input.endDate <= input.startDate) throw new ValidationError('End date must be after the start date');
+  }
+  if (input.coverAmount !== undefined && (input.coverAmount < 0 || input.coverAmount > MAX_AMOUNT)) throw new ValidationError('Cover amount looks invalid');
+  return {
+    ...input,
+    name: input.name.trim().slice(0, 80),
+    provider: input.provider.trim().slice(0, 80),
+    policyNumber: input.policyNumber.trim().slice(0, 40),
+    notes: input.notes.trim().slice(0, 1000),
+    amount,
+    coverAmount: input.coverAmount ? round2(input.coverAmount) : undefined,
+    endDate: input.endDate || undefined,
+  };
+}
+
+function cleanPayment(input: PlanPaymentInput): PlanPaymentInput {
+  const amount = round2(input.amount);
+  assertAmount(amount, 'Payment amount');
+  assertDate(input.date, 'Payment date');
+  return { ...input, amount, notes: input.notes.trim().slice(0, 500) };
 }
 
 function cleanRepayment(input: RepaymentInput): RepaymentInput {
@@ -165,12 +225,24 @@ export const useStore = create<State>()((_set, get) => {
     if (!l) throw new ValidationError('Loan not found');
     return l;
   };
+  const findNote = (id: string) => {
+    const n = get().notes.find((x) => x.id === id);
+    if (!n) throw new ValidationError('Calculation not found');
+    return n;
+  };
+  const findPlan = (id: string) => {
+    const p = get().plans.find((x) => x.id === id);
+    if (!p) throw new ValidationError('Plan not found');
+    return p;
+  };
   const putLoan = (l: Loan): Op => ({ kind: 'loan', op: 'put', doc: { ...l, updatedAt: nowISO() } });
   const txLabel = (t: { type: string; amount: number; category: string }) => `${t.type === 'income' ? 'Cash in' : 'Cash out'} ${formatINR(t.amount)} · ${t.category}`;
 
   return {
     transactions: [],
     loans: [],
+    notes: [],
+    plans: [],
     activity: [],
     settings: defaultSettings,
     status: 'idle',
@@ -295,17 +367,108 @@ export const useStore = create<State>()((_set, get) => {
         ...data.transactions.map((doc): Op => ({ kind: 'tx', op: 'put', doc })),
         ...data.loans.map((doc): Op => ({ kind: 'loan', op: 'put', doc: { ...doc, repayments: doc.repayments ?? [] } })),
       ];
+      if (data.notes) {
+        const keep = new Set(data.notes.map((n) => n.id));
+        ops.push(...s.notes.filter((n) => !keep.has(n.id) && !n.deletedAt).map((n): Op => ({ kind: 'note', op: 'put', doc: { ...n, deletedAt: nowISO() } })));
+        ops.push(...data.notes.map((doc): Op => ({ kind: 'note', op: 'put', doc: { ...doc, entries: doc.entries ?? [] } })));
+      }
+      if (data.plans) {
+        const keep = new Set(data.plans.map((p) => p.id));
+        ops.push(...s.plans.filter((p) => !keep.has(p.id) && !p.deletedAt).map((p): Op => ({ kind: 'plan', op: 'put', doc: { ...p, deletedAt: nowISO() } })));
+        ops.push(...data.plans.map((doc): Op => ({ kind: 'plan', op: 'put', doc: { ...doc, payments: doc.payments ?? [] } })));
+      }
       if (data.settings) ops.push({ kind: 'settings', op: 'put', doc: { ...defaultSettings, ...data.settings, theme: s.settings.theme } });
       ops.push(activity({ action: 'imported', entity: 'data', label }));
       return commit(ops);
     },
     loadSampleData: async () => get().replaceAll(buildSampleData(), 'Loaded sample data'),
+    /* ------------------------------------------------ calculation notes */
+    addNote: async (name, description) => {
+      if (!name.trim()) throw new ValidationError('Give the calculation a name, e.g. "Paddy harvest 2026"');
+      const n: CalcNote = { id: uid(), name: name.trim().slice(0, 80), description: description.trim().slice(0, 300), entries: [], createdAt: nowISO(), updatedAt: nowISO() };
+      return { id: n.id, result: await commit([{ kind: 'note', op: 'put', doc: n }, activity({ action: 'created', entity: 'note', label: `New calculation "${n.name}"` })]) };
+    },
+    updateNote: async (id, patch) => {
+      if (!patch.name.trim()) throw new ValidationError('Name is required');
+      const n = findNote(id);
+      return commit([{ kind: 'note', op: 'put', doc: { ...n, name: patch.name.trim().slice(0, 80), description: patch.description.trim().slice(0, 300), updatedAt: nowISO() } }]);
+    },
+    deleteNote: async (id) => {
+      const n = findNote(id);
+      return commit([{ kind: 'note', op: 'put', doc: { ...n, deletedAt: nowISO() } }, activity({ action: 'deleted', entity: 'note', label: `Calculation "${n.name}" moved to trash` })]);
+    },
+    restoreNote: async (id) => {
+      const { deletedAt: _d, ...n } = findNote(id);
+      return commit([{ kind: 'note', op: 'put', doc: n }, activity({ action: 'restored', entity: 'note', label: `Restored calculation "${n.name}"` })]);
+    },
+    addNoteEntry: async (noteId, input) => {
+      const n = findNote(noteId);
+      const e = cleanEntry(input);
+      return commit([
+        { kind: 'note', op: 'put', doc: { ...n, updatedAt: nowISO(), entries: [...n.entries, { ...e, id: uid(), createdAt: nowISO() }] } },
+        activity({ action: 'created', entity: 'note', label: `${n.name}: ${e.type === 'in' ? 'received' : 'spent'} ${formatINR(e.amount)}` }),
+      ]);
+    },
+    updateNoteEntry: async (noteId, entryId, input) => {
+      const n = findNote(noteId);
+      const e = cleanEntry(input);
+      return commit([{ kind: 'note', op: 'put', doc: { ...n, updatedAt: nowISO(), entries: n.entries.map((x) => (x.id === entryId ? { ...x, ...e } : x)) } }]);
+    },
+    deleteNoteEntry: async (noteId, entryId) => {
+      const n = findNote(noteId);
+      const e = n.entries.find((x) => x.id === entryId);
+      return commit([
+        { kind: 'note', op: 'put', doc: { ...n, updatedAt: nowISO(), entries: n.entries.filter((x) => x.id !== entryId) } },
+        activity({ action: 'deleted', entity: 'note', label: `${n.name}: removed ${e ? formatINR(e.amount) : 'entry'} (kept in history)` }),
+      ]);
+    },
+
+    /* ---------------------------------------- investments & insurance */
+    addPlan: async (input) => {
+      const p: Plan = { ...cleanPlan(input), id: uid(), payments: [], createdAt: nowISO(), updatedAt: nowISO() };
+      return { id: p.id, result: await commit([{ kind: 'plan', op: 'put', doc: p }, activity({ action: 'created', entity: 'plan', label: `Added ${p.kind} "${p.name}"` })]) };
+    },
+    updatePlan: async (id, input) => {
+      const p = findPlan(id);
+      return commit([{ kind: 'plan', op: 'put', doc: { ...p, ...cleanPlan(input), updatedAt: nowISO() } }, activity({ action: 'updated', entity: 'plan', label: `Edited ${p.kind} "${input.name}"` })]);
+    },
+    deletePlan: async (id) => {
+      const p = findPlan(id);
+      return commit([{ kind: 'plan', op: 'put', doc: { ...p, deletedAt: nowISO() } }, activity({ action: 'deleted', entity: 'plan', label: `${p.kind} "${p.name}" moved to trash` })]);
+    },
+    restorePlan: async (id) => {
+      const { deletedAt: _d, ...p } = findPlan(id);
+      return commit([{ kind: 'plan', op: 'put', doc: p }, activity({ action: 'restored', entity: 'plan', label: `Restored ${p.kind} "${p.name}"` })]);
+    },
+    addPlanPayment: async (planId, input) => {
+      const p = findPlan(planId);
+      const pay = cleanPayment(input);
+      return commit([
+        { kind: 'plan', op: 'put', doc: { ...p, updatedAt: nowISO(), payments: [...p.payments, { ...pay, id: uid(), createdAt: nowISO() }] } },
+        activity({ action: 'created', entity: 'plan', label: `Paid ${formatINR(pay.amount)} for ${p.kind} "${p.name}"` }),
+      ]);
+    },
+    updatePlanPayment: async (planId, paymentId, input) => {
+      const p = findPlan(planId);
+      const pay = cleanPayment(input);
+      return commit([{ kind: 'plan', op: 'put', doc: { ...p, updatedAt: nowISO(), payments: p.payments.map((x) => (x.id === paymentId ? { ...x, ...pay } : x)) } }]);
+    },
+    deletePlanPayment: async (planId, paymentId) => {
+      const p = findPlan(planId);
+      return commit([
+        { kind: 'plan', op: 'put', doc: { ...p, updatedAt: nowISO(), payments: p.payments.filter((x) => x.id !== paymentId) } },
+        activity({ action: 'deleted', entity: 'plan', label: `Removed a payment from "${p.name}" (kept in history)` }),
+      ]);
+    },
+
     moveAllToTrash: async () => {
       const s = get();
       const at = nowISO();
       return commit([
         ...s.transactions.filter((t) => !t.deletedAt).map((t): Op => ({ kind: 'tx', op: 'put', doc: { ...t, deletedAt: at } })),
         ...s.loans.filter((l) => !l.deletedAt).map((l): Op => ({ kind: 'loan', op: 'put', doc: { ...l, deletedAt: at } })),
+        ...s.notes.filter((n) => !n.deletedAt).map((n): Op => ({ kind: 'note', op: 'put', doc: { ...n, deletedAt: at } })),
+        ...s.plans.filter((p) => !p.deletedAt).map((p): Op => ({ kind: 'plan', op: 'put', doc: { ...p, deletedAt: at } })),
         activity({ action: 'deleted', entity: 'data', label: 'Moved all records to Trash' }),
       ]);
     },
@@ -314,8 +477,8 @@ export const useStore = create<State>()((_set, get) => {
 
 /** Builds the JSON backup payload from the current state. */
 export function makeBackup(): BackupFile {
-  const { transactions, loans, settings } = useStore.getState();
-  return { app: 'paisa-ledger', version: 2, exportedAt: nowISO(), transactions, loans, settings };
+  const { transactions, loans, notes, plans, settings } = useStore.getState();
+  return { app: 'paisa-ledger', version: 2, exportedAt: nowISO(), transactions, loans, notes, plans, settings };
 }
 
 export function isBackupFile(x: unknown): x is BackupFile {

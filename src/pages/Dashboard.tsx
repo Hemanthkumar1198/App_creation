@@ -16,6 +16,7 @@ import {
   Wallet,
   FileUp,
   Sparkles,
+  NotebookPen,
   AlertCircle,
 } from 'lucide-react';
 import { useMemo } from 'react';
@@ -26,10 +27,53 @@ import { EmptyState, SectionTitle, StatCard, StatusBadge } from '../components/u
 import { endOfMonth, formatDate, formatMonth, relativeDays, startOfMonth, todayISO } from '../lib/dates';
 import { formatINR } from '../lib/format';
 import { computeLoan, portfolio } from '../lib/loans';
+import { computePlan, noteTotals } from '../lib/plans';
 import { categoryBreakdown, live, personalBalance, trailingPeriods, txTotals } from '../lib/reports';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
 import { useSave } from '../lib/useSave';
+
+/** Shortcuts to the separate trackers: calculation notes and investments & insurance. */
+function OtherTrackers() {
+  const notes = useStore((s) => s.notes);
+  const plans = useStore((s) => s.plans);
+  const today = todayISO();
+  const n = useMemo(() => notes.filter((x) => !x.deletedAt).map((x) => ({ x, t: noteTotals(x) })), [notes]);
+  const p = useMemo(() => plans.filter((x) => !x.deletedAt).map((x) => ({ x, s: computePlan(x, today) })), [plans, today]);
+  const due = p.filter(({ s }) => s.daysToDue !== null && s.daysToDue <= 7);
+  return (
+    <section className="grid gap-3 sm:grid-cols-2 sm:gap-4">
+      <Link to="/notes" className="card card-pad flex items-center gap-3 transition hover:shadow-lg">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+          <NotebookPen size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-bold">Calculation Notes</div>
+          <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+            {n.length ? n.slice(0, 3).map(({ x, t }) => `${x.name}: ${formatINR(t.spent)}`).join(' · ') : 'Separate calculations, e.g. paddy harvest'}
+          </div>
+        </div>
+        <ChevronRight size={18} className="text-slate-400" />
+      </Link>
+      <Link to="/investments" className="card card-pad flex items-center gap-3 transition hover:shadow-lg">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
+          <TrendingUp size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-bold">Investments & Insurance</div>
+          <div className={`truncate text-xs ${due.length ? 'font-semibold text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>
+            {p.length
+              ? due.length
+                ? `${due.length} payment${due.length > 1 ? 's' : ''} due this week`
+                : `${p.length} plans · paid ${formatINR(p.reduce((a, { s }) => a + s.paidThisYear, 0))} this year`
+              : 'Track SIP, LIC, term insurance'}
+          </div>
+        </div>
+        <ChevronRight size={18} className="text-slate-400" />
+      </Link>
+    </section>
+  );
+}
 
 function GettingStarted() {
   const open = useUI((s) => s.open);
@@ -157,7 +201,7 @@ export default function Dashboard() {
               onClick={() => open({ kind: 'loan' })}
               className="col-span-2 flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3.5 text-base font-bold text-brand-700 shadow-lg transition hover:bg-white/90 active:scale-[0.98]"
             >
-              <HandCoins size={20} /> Add Loan
+              <HandCoins size={20} /> Add Interest Record
             </button>
           </div>
         </div>
@@ -183,6 +227,8 @@ export default function Dashboard() {
         </div>
       </section>
 
+      <OtherTrackers />
+
       {/* Charts */}
       <section className="grid gap-4 lg:grid-cols-5">
         <div className="card card-pad lg:col-span-3">
@@ -197,7 +243,7 @@ export default function Dashboard() {
 
       {/* Loan summary */}
       <section>
-        <SectionTitle title="Lending summary" subtitle="Money lent to people — kept separate from your income & expenses" action={<Link to="/loans" className="text-xs font-semibold text-brand-600 dark:text-brand-300">Loans →</Link>} />
+        <SectionTitle title="Interest calculation summary" subtitle="Money lent on interest — kept separate from your income & expenses" action={<Link to="/loans" className="text-xs font-semibold text-brand-600 dark:text-brand-300">Interest →</Link>} />
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           <StatCard label="💰 Total Lent" value={pf.totalLent} icon={Landmark} tone="loan" />
           <StatCard label="💵 Total Repaid" value={pf.totalRepaid} icon={CheckCircle2} tone="income" />

@@ -1,4 +1,5 @@
-import type { Loan, Transaction } from '../types';
+import type { Loan, Plan, Transaction } from '../types';
+import { computePlan } from './plans';
 import { addMonths, diffDays, endOfMonth, formatDate, formatMonth, relativeDays, startOfMonth, todayISO } from './dates';
 import { formatINR } from './format';
 import { computeLoan } from './loans';
@@ -11,9 +12,10 @@ export interface Reminder {
   message: string;
   date: string;
   loanId?: string;
+  planId?: string;
 }
 
-export function buildReminders(loans: Loan[], txs: Transaction[], windowDays = 7, today = todayISO()): Reminder[] {
+export function buildReminders(loans: Loan[], txs: Transaction[], windowDays = 7, today = todayISO(), plans: Plan[] = []): Reminder[] {
   const out: Reminder[] = [];
   for (const l of live(loans)) {
     const s = computeLoan(l, today);
@@ -60,6 +62,20 @@ export function buildReminders(loans: Loan[], txs: Transaction[], windowDays = 7
       date: s.nextInterestDueDate,
       title: days < 0 ? `Interest pending from ${l.borrowerName}` : `Interest from ${l.borrowerName} due ${relativeDays(s.nextInterestDueDate, today)}`,
       message: `${formatINR(s.remainingInterest)} interest due · last received ${s.lastInterestPayment ? formatDate(s.lastInterestPayment.date) : 'never'}`,
+    });
+  }
+
+  // SIP / insurance premiums.
+  for (const p of plans.filter((x) => !x.deletedAt)) {
+    const s = computePlan(p, today);
+    if (s.daysToDue === null || s.daysToDue > windowDays) continue;
+    out.push({
+      id: `plan-${p.id}`,
+      kind: s.overdue ? 'pending' : 'due-soon',
+      planId: p.id,
+      date: s.nextDueDate!,
+      title: s.overdue ? `${p.kind} payment pending: ${p.name}` : `${p.kind} due ${relativeDays(s.nextDueDate!, today)}: ${p.name}`,
+      message: `${formatINR(p.amount)} · due ${formatDate(s.nextDueDate)}`,
     });
   }
 

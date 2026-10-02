@@ -14,6 +14,7 @@ import {
   yearlyInterest,
 } from './finance';
 import { computeLoan, expectedInterest, portfolio, suggestRepaymentSplit } from './loans';
+import { computePlan, noteTotals } from './plans';
 
 const now = '2026-10-01T00:00:00.000Z';
 
@@ -210,3 +211,33 @@ describe('loan engine', () => {
   });
 });
 
+
+describe('investments & insurance', () => {
+  const plan = (payments: { date: string; amount: number }[], freq: 'monthly' | 'yearly' = 'monthly') => ({
+    id: 'p', name: 'Index SIP', kind: 'SIP' as const, provider: '', policyNumber: '', amount: 5000, frequency: freq, startDate: '2026-01-05', notes: '',
+    payments: payments.map((p, i) => ({ id: String(i), paymentMethod: 'UPI' as const, notes: '', createdAt: now, ...p })), createdAt: now, updatedAt: now,
+  });
+  it('computes next due date from the last payment, totals and overdue', () => {
+    const s = computePlan(plan([{ date: '2026-08-05', amount: 5000 }, { date: '2026-09-05', amount: 5000 }, { date: '2025-12-05', amount: 5000 }]), '2026-10-10');
+    expect(s.totalPaid).toBe(15000);
+    expect(s.paidThisYear).toBe(10000);
+    expect(s.nextDueDate).toBe('2026-10-05');
+    expect(s.overdue).toBe(true);
+    expect(s.yearlyCommitment).toBe(60000);
+  });
+  it('first due date is the start date; yearly premiums', () => {
+    expect(computePlan(plan([], 'yearly'), '2026-01-01').nextDueDate).toBe('2026-01-05');
+    expect(computePlan(plan([{ date: '2026-01-05', amount: 5000 }], 'yearly'), '2026-03-01').nextDueDate).toBe('2027-01-05');
+  });
+});
+
+describe('calculation notes', () => {
+  it('totals spent, received and net', () => {
+    const t = noteTotals({ id: 'n', name: 'Paddy', description: '', createdAt: now, updatedAt: now, entries: [
+      { id: '1', date: '2026-06-01', type: 'out', amount: 4000, description: 'Labour', notes: '', createdAt: now },
+      { id: '2', date: '2026-06-03', type: 'out', amount: 2500.5, description: 'Fertiliser', notes: '', createdAt: now },
+      { id: '3', date: '2026-10-01', type: 'in', amount: 30000, description: 'Paddy sale', notes: '', createdAt: now },
+    ] });
+    expect(t).toMatchObject({ spent: 6500.5, received: 30000, net: 23499.5, count: 3, lastDate: '2026-10-01' });
+  });
+});

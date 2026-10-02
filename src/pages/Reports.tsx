@@ -30,6 +30,8 @@ const NOUN: Record<PeriodKind, string> = { daily: 'days', weekly: 'weeks', month
 export default function Reports() {
   const txsAll = useStore((s) => s.transactions);
   const loansAll = useStore((s) => s.loans);
+  const notesAll = useStore((s) => s.notes);
+  const plansAll = useStore((s) => s.plans);
   const toast = useUI((s) => s.toast);
   const today = todayISO();
   const [kind, setKind] = useState<PeriodKind>('monthly');
@@ -55,7 +57,7 @@ export default function Reports() {
   const doExport = async (format: ExportFormat) => {
     setBusy(format);
     try {
-      await exportData(format, txs, loans, { start: period.start, end: period.end, label: `${kind[0].toUpperCase()}${kind.slice(1)} report ${period.label}` }, { categories: cats });
+      await exportData(format, txs, loans, { start: period.start, end: period.end, label: `${kind[0].toUpperCase()}${kind.slice(1)} report ${period.label}` }, { categories: cats, notes: notesAll, plans: plansAll });
       toast(format === 'pdf' ? 'PDF downloaded' : format === 'xlsx' ? 'Excel file downloaded' : 'CSV downloaded');
     } catch (e) {
       console.error(e);

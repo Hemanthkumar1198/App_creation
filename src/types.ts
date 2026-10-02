@@ -84,7 +84,7 @@ export interface ActivityEntry {
   id: string;
   at: string;
   action: 'created' | 'updated' | 'deleted' | 'restored' | 'purged' | 'imported' | 'repayment' | 'closed';
-  entity: 'transaction' | 'loan' | 'repayment' | 'data';
+  entity: 'transaction' | 'loan' | 'repayment' | 'data' | 'note' | 'plan';
   label: string;
 }
 
@@ -92,7 +92,67 @@ export interface ActivityEntry {
 export interface HistoryEntry {
   id: string;
   at: string;
-  entity: 'transaction' | 'loan';
+  entity: 'transaction' | 'loan' | 'note' | 'plan';
   docId: string;
-  before: Transaction | Loan;
+  before: Transaction | Loan | CalcNote | Plan;
+}
+
+/* ---------------------------------------------------------- Calculation notes */
+
+/** One line in a separate calculation (e.g. "Paddy harvest" — labour ₹4,000). */
+export interface NoteEntry {
+  id: string;
+  date: string;
+  /** 'out' = money spent, 'in' = money received (e.g. paddy sale). */
+  type: 'out' | 'in';
+  amount: number;
+  description: string;
+  notes: string;
+  createdAt: string;
+}
+
+/** A separate calculation book, kept apart from daily expenses. */
+export interface CalcNote {
+  id: string;
+  name: string;
+  description: string;
+  entries: NoteEntry[];
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/* ---------------------------------------------------- Investments & insurance */
+
+export type PlanKind = 'SIP' | 'Mutual Fund' | 'LIC' | 'Term Insurance' | 'Health Insurance' | 'Vehicle Insurance' | 'PPF' | 'FD / RD' | 'Gold' | 'Other';
+export type PlanFrequency = 'monthly' | 'quarterly' | 'half-yearly' | 'yearly' | 'one-time';
+
+export interface PlanPayment {
+  id: string;
+  date: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  notes: string;
+  createdAt: string;
+}
+
+/** A recurring investment or insurance policy (SIP, LIC, term plan…) and its payments. */
+export interface Plan {
+  id: string;
+  name: string;
+  kind: PlanKind;
+  provider: string;
+  policyNumber: string;
+  /** Instalment / premium amount. */
+  amount: number;
+  frequency: PlanFrequency;
+  startDate: string;
+  endDate?: string;
+  /** Sum assured / cover / target amount (optional). */
+  coverAmount?: number;
+  notes: string;
+  payments: PlanPayment[];
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
 }

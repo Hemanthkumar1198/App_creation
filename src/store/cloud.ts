@@ -9,11 +9,11 @@ import {
   type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { ActivityEntry, Loan, Settings, Transaction } from '../types';
+import type { ActivityEntry, CalcNote, Loan, Plan, Settings, Transaction } from '../types';
 import { getFirebase } from '../lib/firebase';
 import { defaultSettings, type Backend, type CommitResult, type DataSnapshot, type Op } from './backend';
 
-const COL = { tx: 'transactions', loan: 'loans', activity: 'activity', history: 'history' } as const;
+const COL = { tx: 'transactions', loan: 'loans', activity: 'activity', history: 'history', note: 'notes', plan: 'plans' } as const;
 
 export interface CloudCallbacks {
   onData: (patch: Partial<DataSnapshot>) => void;
@@ -23,6 +23,13 @@ export interface CloudCallbacks {
   onServerSynced: (info: { empty: boolean }) => void;
   onPending: (pending: boolean) => void;
   onError: (err: Error) => void;
+}
+
+/** Newer sections need the latest firestore.rules; explain that instead of a bare "permission denied". */
+function sectionRulesError(e: Error & { code?: string }): Error {
+  if (e.code === 'permission-denied')
+    return new Error('Calculation Notes and Investments need the updated database rules: paste the latest firestore.rules into Firebase → Firestore → Rules and click Publish. Your other data is fine.');
+  return e;
 }
 
 const delay = (ms: number) => new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms));
@@ -39,7 +46,7 @@ export function createCloudBackend(uid: string, cb: CloudCallbacks): Backend {
   const synced = new Map<string, boolean>(); // name -> empty
   let loadedFired = false;
   let syncedFired = false;
-  const names = ['tx', 'loan', 'activity', 'user'];
+  const names = ['tx', 'loan', 'note', 'plan', 'activity', 'user'];
 
   const track = (name: string, empty: boolean, fromCache: boolean, hasPendingWrites: boolean) => {
     pending[name] = hasPendingWrites;
@@ -80,6 +87,30 @@ export function createCloudBackend(uid: string, cb: CloudCallbacks): Backend {
         track('loan', snap.empty, snap.metadata.fromCache, snap.metadata.hasPendingWrites);
       },
       (e) => cb.onError(e),
+    ),
+    onSnapshot(
+      collection(db, base, COL.note),
+      opts,
+      (snap) => {
+        cb.onData({ notes: snap.docs.map((d) => { const n = d.data() as CalcNote; return { ...n, entries: n.entries ?? [] }; }) });
+        track('note', snap.empty, snap.metadata.fromCache, snap.metadata.hasPendingWrites);
+      },
+      (e) => {
+        track('note', true, false, false);
+        cb.onError(sectionRulesError(e));
+      },
+    ),
+    onSnapshot(
+      collection(db, base, COL.plan),
+      opts,
+      (snap) => {
+        cb.onData({ plans: snap.docs.map((d) => { const p = d.data() as Plan; return { ...p, payments: p.payments ?? [] }; }) });
+        track('plan', snap.empty, snap.metadata.fromCache, snap.metadata.hasPendingWrites);
+      },
+      (e) => {
+        track('plan', true, false, false);
+        cb.onError(sectionRulesError(e));
+      },
     ),
     onSnapshot(
       query(collection(db, base, COL.activity), orderBy('at', 'desc'), limit(300)),

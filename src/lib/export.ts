@@ -2,7 +2,8 @@
  * Exports. Personal finance and lending are always exported as separate sections:
  * Daily Expenses · Income · Investments · Loans · Loan Repayments · Outstanding Loans.
  */
-import type { Loan, Transaction } from '../types';
+import type { CalcNote, Loan, Plan, Transaction } from '../types';
+import { computePlan, noteTotals } from './plans';
 import { formatDate, formatDateNumeric, todayISO } from './dates';
 import { round2 } from './finance';
 import { formatRs } from './format';
@@ -76,7 +77,7 @@ export interface ExportRange {
   label: string;
 }
 
-export function buildSections(allTxs: Transaction[], allLoans: Loan[], range: ExportRange): Section[] {
+export function buildSections(allTxs: Transaction[], allLoans: Loan[], range: ExportRange, notes: CalcNote[] = [], plans: Plan[] = []): Section[] {
   const start = range.start ?? '0000-01-01';
   const end = range.end ?? '9999-12-31';
   const asOf = end < todayISO() ? end : todayISO();
@@ -151,6 +152,48 @@ export function buildSections(allTxs: Transaction[], allLoans: Loan[], range: Ex
         .map(({ l, s }) => [l.borrowerName, l.phone, s.remainingPrincipal, s.remainingInterest, s.totalOutstanding, s.nextDueDate ? formatDateNumeric(s.nextDueDate) : '', STATUS_LABEL[s.status]]),
       total: round2(summaries.reduce((a, x) => a + x.s.totalOutstanding, 0)),
     },
+    {
+      title: 'Calculation Notes',
+      columns: [
+        { header: 'Calculation', width: 22 },
+        { header: 'Date', width: 12 },
+        { header: 'Type', width: 10 },
+        { header: 'For', width: 26 },
+        { header: 'Amount', money: true, width: 13 },
+        { header: 'Notes', width: 26 },
+      ],
+      rows: notes
+        .filter((n) => !n.deletedAt)
+        .flatMap((n) => [
+          ...[...n.entries]
+            .filter((e) => inRange(e.date, start, end))
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .map((e) => [n.name, formatDateNumeric(e.date), e.type === 'in' ? 'Received' : 'Spent', e.description, e.amount, e.notes] as Cell[]),
+          [n.name, '', 'TOTAL', `Spent ${noteTotals(n).spent.toFixed(2)} · Received ${noteTotals(n).received.toFixed(2)}`, noteTotals(n).net, 'Net (received − spent)'] as Cell[],
+        ]),
+    },
+    {
+      title: 'Investments & Insurance',
+      columns: [
+        { header: 'Name', width: 24 },
+        { header: 'Type', width: 16 },
+        { header: 'Provider', width: 16 },
+        { header: 'Instalment', money: true, width: 13 },
+        { header: 'Frequency', width: 12 },
+        { header: 'Paid in period', money: true, width: 14 },
+        { header: 'Total paid', money: true, width: 13 },
+        { header: 'Next due', width: 12 },
+        { header: 'Policy / folio', width: 16 },
+      ],
+      rows: plans
+        .filter((p) => !p.deletedAt)
+        .map((p) => {
+          const s = computePlan(p);
+          const inPeriod = round2(p.payments.filter((x) => inRange(x.date, start, end)).reduce((a, x) => a + x.amount, 0));
+          return [p.name, p.kind, p.provider, p.amount, p.frequency, inPeriod, s.totalPaid, s.nextDueDate ? formatDateNumeric(s.nextDueDate) : '', p.policyNumber] as Cell[];
+        }),
+      total: round2(plans.filter((p) => !p.deletedAt).reduce((a, p) => a + p.payments.filter((x) => inRange(x.date, start, end)).reduce((b, x) => b + x.amount, 0), 0)),
+    },
   ];
 }
 
@@ -167,6 +210,7 @@ function summaryRows(sections: Section[]): [string, number][] {
     ['Money lent (in period)', get('Loans (Money Lent)')],
     ['Loan repayments received', get('Loan Repayments')],
     ['Outstanding loans', get('Outstanding Loans')],
+    ['Paid to investments & insurance', get('Investments & Insurance')],
   ];
 }
 
@@ -283,6 +327,8 @@ export async function exportSectionsPDF(sections: Section[], range: ExportRange,
     'Loans (Money Lent)': [124, 58, 237],
     'Loan Repayments': [5, 150, 105],
     'Outstanding Loans': [124, 58, 237],
+    'Calculation Notes': [234, 88, 12],
+    'Investments & Insurance': [5, 150, 105],
   };
   for (const s of sections) {
     y = next();
@@ -318,8 +364,14 @@ export async function exportSectionsPDF(sections: Section[], range: ExportRange,
 
 export type ExportFormat = 'xlsx' | 'csv' | 'pdf';
 
-export async function exportData(format: ExportFormat, txs: Transaction[], loans: Loan[], range: ExportRange, extra?: { categories?: { category: string; amount: number; share: number }[] }) {
-  const sections = buildSections(txs, loans, range);
+export async function exportData(
+  format: ExportFormat,
+  txs: Transaction[],
+  loans: Loan[],
+  range: ExportRange,
+  extra?: { categories?: { category: string; amount: number; share: number }[]; notes?: CalcNote[]; plans?: Plan[] },
+) {
+  const sections = buildSections(txs, loans, range, extra?.notes, extra?.plans);
   const base = `paisa-ledger-${range.label.replace(/[^\w]+/g, '-').toLowerCase()}`;
   if (format === 'xlsx') return exportSectionsExcel(sections, range, `${base}.xlsx`);
   if (format === 'csv') return exportSectionsCSV(sections, range, `${base}.csv`);

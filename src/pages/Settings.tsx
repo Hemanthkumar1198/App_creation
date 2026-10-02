@@ -211,14 +211,18 @@ export default function Settings() {
   const [exporting, setExporting] = useState<'' | ExportFormat>('');
   const [name, setName] = useState(settings.userName);
 
+  const { notes, plans } = st;
   const trash = useMemo(
     () =>
       [
         ...transactions.filter((t) => t.deletedAt).map((t) => ({ id: t.id, kind: 'transaction' as const, label: `${t.description || t.category} · ${formatINR(t.amount)}`, at: t.deletedAt! })),
-        ...loans.filter((l) => l.deletedAt).map((l) => ({ id: l.id, kind: 'loan' as const, label: `Loan to ${l.borrowerName} · ${formatINR(l.principal)}`, at: l.deletedAt! })),
+        ...loans.filter((l) => l.deletedAt).map((l) => ({ id: l.id, kind: 'loan' as const, label: `Interest record: ${l.borrowerName} · ${formatINR(l.principal)}`, at: l.deletedAt! })),
+        ...notes.filter((n) => n.deletedAt).map((n) => ({ id: n.id, kind: 'note' as const, label: `Calculation: ${n.name}`, at: n.deletedAt! })),
+        ...plans.filter((p) => p.deletedAt).map((p) => ({ id: p.id, kind: 'plan' as const, label: `${p.kind}: ${p.name}`, at: p.deletedAt! })),
       ].sort((a, b) => b.at.localeCompare(a.at)),
-    [transactions, loans],
+    [transactions, loans, notes, plans],
   );
+
 
   const backup = () => {
     downloadJSON(`paisa-ledger-backup-${new Date().toISOString().slice(0, 10)}.json`, makeBackup());
@@ -228,7 +232,7 @@ export default function Settings() {
   const exportAll = async (format: ExportFormat) => {
     setExporting(format);
     try {
-      await exportData(format, transactions, loans, { label: `Full export ${formatDate(new Date().toISOString().slice(0, 10))}` });
+      await exportData(format, transactions, loans, { label: `Full export ${formatDate(new Date().toISOString().slice(0, 10))}` }, { notes, plans });
       toast('Export downloaded');
     } catch (e) {
       console.error(e);
@@ -425,7 +429,7 @@ export default function Settings() {
                       <div className="truncate text-sm font-medium">{t.label}</div>
                       <div className="text-xs text-slate-500">Deleted {formatDate(t.at.slice(0, 10))}</div>
                     </div>
-                    <button className="btn-ghost px-2.5 py-1.5 text-xs" disabled={saving} onClick={() => run(() => (t.kind === 'loan' ? st.restoreLoan(t.id) : st.restoreTransaction(t.id)), 'Restored')}>
+                    <button className="btn-ghost px-2.5 py-1.5 text-xs" disabled={saving} onClick={() => run(() => (t.kind === 'loan' ? st.restoreLoan(t.id) : t.kind === 'note' ? st.restoreNote(t.id) : t.kind === 'plan' ? st.restorePlan(t.id) : st.restoreTransaction(t.id)), 'Restored')}>
                       <RotateCcw size={14} /> Restore
                     </button>
                   </div>

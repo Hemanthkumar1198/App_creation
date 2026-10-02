@@ -130,7 +130,7 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
         const out = await addLoan(payload);
         id = out.id;
         return out;
-      }, `Loan of ${formatINR(payload.principal)} to ${payload.borrowerName} added`);
+      }, `Interest record for ${payload.borrowerName} (${formatINR(payload.principal)}) added`);
       if (ok) {
         onClose();
         navigate(`/loans/${id}`);
@@ -158,7 +158,7 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
   return (
     <Sheet
       wide
-      title={existing ? 'Edit loan' : 'New loan'}
+      title={existing ? 'Edit interest record' : 'New interest record'}
       subtitle={existing ? existing.borrowerName : 'Money you lent to someone (kept separate from your expenses)'}
       onClose={onClose}
       footer={
@@ -173,7 +173,7 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
           </button>
           <button className="btn-primary flex-1" onClick={save} disabled={saving}>
             {saving && <Loader2 size={16} className="animate-spin" />}
-            {saving ? 'Saving…' : existing ? 'Save changes' : 'Add loan'}
+            {saving ? 'Saving…' : existing ? 'Save changes' : 'Add record'}
           </button>
         </div>
       }

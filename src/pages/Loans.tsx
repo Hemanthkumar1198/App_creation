@@ -94,8 +94,8 @@ export default function Loans() {
   return (
     <div>
       <PageHeader
-        title="Loans"
-        subtitle="Money you lent to people — kept separate from your daily income & expenses"
+        title="Interest Calculation"
+        subtitle="Money you lent on interest: amounts, interest received and pending, per person. Kept separate from daily expenses."
         actions={
           <>
             <Link to="/import" className="btn-secondary">
@@ -105,7 +105,7 @@ export default function Loans() {
               <Download size={16} /> <span className="hidden sm:inline">Export</span>
             </button>
             <button className="btn-primary" onClick={() => open({ kind: 'loan' })}>
-              <Plus size={16} /> Add loan
+              <Plus size={16} /> Add interest record
             </button>
           </>
         }
@@ -297,7 +297,7 @@ export default function Loans() {
             </div>
           )}
           <button className="btn-primary mt-4 w-full sm:w-auto" onClick={() => open({ kind: 'loan' })}>
-            <Plus size={16} /> Add another person's loan
+            <Plus size={16} /> Add another person
           </button>
         </>
       )}
