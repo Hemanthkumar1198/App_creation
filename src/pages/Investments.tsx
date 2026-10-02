@@ -34,10 +34,10 @@ export default function Investments() {
     <div className="space-y-5">
       <PageHeader
         title="Investments & Insurance"
-        subtitle="SIP, mutual funds, LIC, term & health insurance: every instalment and premium in one place"
+        subtitle="Create as many records as you like (SIP, LIC, term insurance, gold, chit fund, anything) and add entries inside each"
         actions={
           <button className="btn-primary" onClick={() => open({ kind: 'plan' })}>
-            <Plus size={16} /> Add SIP / policy
+            <Plus size={16} /> New record
           </button>
         }
       />
@@ -95,7 +95,7 @@ export default function Investments() {
             message="Add your SIPs, LIC policy, term insurance and other recurring payments to track every instalment and due date."
             action={
               <button className="btn-primary" onClick={() => open({ kind: 'plan' })}>
-                <Plus size={16} /> Add SIP / policy
+                <Plus size={16} /> New record
               </button>
             }
           />
@@ -112,7 +112,8 @@ export default function Investments() {
                   <div className="truncate font-semibold">{p.name}</div>
                   <div className="truncate text-xs text-slate-500 dark:text-slate-400">
                     {p.kind}
-                    {p.provider ? ` · ${p.provider}` : ''} · {formatINR(p.amount)} {PLAN_FREQ.find((f) => f.value === p.frequency)?.label.toLowerCase()}
+                    {p.provider ? ` · ${p.provider}` : ''}
+                    {p.amount > 0 ? ` · ${formatINR(p.amount)} ${PLAN_FREQ.find((f) => f.value === p.frequency)?.label.toLowerCase()}` : ` · ${s.payments} entries`}
                   </div>
                   <div className={clsx('text-xs', s.overdue ? 'font-semibold text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400')}>
                     {s.ended ? (
@@ -121,8 +122,10 @@ export default function Investments() {
                       </span>
                     ) : s.nextDueDate ? (
                       `Next due ${formatDate(s.nextDueDate)} · ${relativeDays(s.nextDueDate, today)}`
+                    ) : s.lastPayment ? (
+                      `Last entry ${formatDate(s.lastPayment.date)}`
                     ) : (
-                      'No upcoming payment'
+                      'No entries yet'
                     )}
                   </div>
                 </Link>
@@ -130,16 +133,17 @@ export default function Investments() {
                   <div className="text-xs text-slate-500 dark:text-slate-400">Total paid</div>
                   <div className="num font-bold">{formatINR(s.totalPaid)}</div>
                 </div>
-                {!s.ended && (
-                  <button className="btn-secondary px-3 py-1.5 text-xs" onClick={() => open({ kind: 'plan-payment', planId: p.id })}>
-                    Pay
-                  </button>
-                )}
+                <button className="btn-secondary px-3 py-1.5 text-xs" onClick={() => open({ kind: 'plan-payment', planId: p.id })}>
+                  <Plus size={14} /> Entry
+                </button>
                 <Link to={`/investments/${p.id}`} aria-label="Open">
                   <ChevronRight size={18} className="text-slate-400" />
                 </Link>
               </div>
             ))}
+            <button className="flex w-full items-center justify-center gap-2 px-4 py-4 text-sm font-semibold text-brand-600 hover:bg-brand-50/50 dark:text-brand-300 dark:hover:bg-white/5" onClick={() => open({ kind: 'plan' })}>
+              <Plus size={16} /> Add another record
+            </button>
           </div>
         </div>
       )}

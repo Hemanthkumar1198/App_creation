@@ -42,9 +42,14 @@ export default function NoteDetail() {
 
   return (
     <div className="space-y-5">
-      <Link to="/notes" className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white">
-        <ArrowLeft size={16} /> All calculations
-      </Link>
+      <div className="flex items-center justify-between gap-2">
+        <Link to="/notes" className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white">
+          <ArrowLeft size={16} /> All calculations
+        </Link>
+        <button className="btn-primary py-2" onClick={() => open({ kind: 'note' })}>
+          <Plus size={16} /> New calculation
+        </button>
+      </div>
 
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 p-5 text-white shadow-lg sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3">

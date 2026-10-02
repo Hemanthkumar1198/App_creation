@@ -78,6 +78,13 @@ export default function Notes() {
               </div>
             </Link>
           ))}
+          <button
+            onClick={() => open({ kind: 'note' })}
+            className="flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 text-sm font-semibold text-brand-600 transition hover:border-brand-400 hover:bg-brand-50/40 dark:border-white/15 dark:text-brand-300 dark:hover:bg-white/5"
+          >
+            <Plus size={22} /> Create another calculation
+            <span className="text-xs font-normal text-slate-500">Any name: farming, construction, wedding, trip…</span>
+          </button>
         </div>
       )}
     </div>

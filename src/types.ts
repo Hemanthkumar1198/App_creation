@@ -131,6 +131,8 @@ export interface PlanPayment {
   id: string;
   date: string;
   amount: number;
+  /** What this entry was for (optional), e.g. "SIP October", "Premium 2026". */
+  description?: string;
   paymentMethod: PaymentMethod;
   notes: string;
   createdAt: string;
@@ -140,10 +142,11 @@ export interface PlanPayment {
 export interface Plan {
   id: string;
   name: string;
-  kind: PlanKind;
+  /** SIP, LIC, Term Insurance… or any custom type you type. */
+  kind: string;
   provider: string;
   policyNumber: string;
-  /** Instalment / premium amount. */
+  /** Regular instalment / premium amount; 0 = no fixed amount (free-form record). */
   amount: number;
   frequency: PlanFrequency;
   startDate: string;

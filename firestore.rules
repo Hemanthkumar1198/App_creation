@@ -53,7 +53,7 @@ service cloud.firestore {
     function validPlan(id) {
       let d = request.resource.data;
       return d.id == id && isText(d.name, 80) && d.name.size() > 0 && isText(d.kind, 30)
-        && isMoney(d.amount) && d.amount > 0 && isDate(d.startDate)
+        && isMoney(d.amount) && isDate(d.startDate)
         && d.frequency in ['monthly', 'quarterly', 'half-yearly', 'yearly', 'one-time']
         && d.payments is list && d.payments.size() <= 5000 && isText(d.notes, 1000);
     }

@@ -157,8 +157,8 @@ function cleanEntry(input: NoteEntryInput): NoteEntryInput {
 
 function cleanPlan(input: PlanInput): PlanInput {
   if (!input.name.trim()) throw new ValidationError('Enter a name, e.g. "HDFC Index Fund SIP" or "LIC Jeevan Anand"');
-  const amount = round2(input.amount);
-  assertAmount(amount, 'Instalment amount');
+  const amount = round2(input.amount || 0);
+  assertAmount(amount, 'Instalment amount', true);
   assertDate(input.startDate, 'Start date');
   if (input.endDate) {
     assertDate(input.endDate, 'End date');
@@ -181,7 +181,7 @@ function cleanPayment(input: PlanPaymentInput): PlanPaymentInput {
   const amount = round2(input.amount);
   assertAmount(amount, 'Payment amount');
   assertDate(input.date, 'Payment date');
-  return { ...input, amount, notes: input.notes.trim().slice(0, 500) };
+  return { ...input, amount, description: (input.description ?? '').trim().slice(0, 200), notes: input.notes.trim().slice(0, 500) };
 }
 
 function cleanRepayment(input: RepaymentInput): RepaymentInput {
@@ -445,7 +445,7 @@ export const useStore = create<State>()((_set, get) => {
       const pay = cleanPayment(input);
       return commit([
         { kind: 'plan', op: 'put', doc: { ...p, updatedAt: nowISO(), payments: [...p.payments, { ...pay, id: uid(), createdAt: nowISO() }] } },
-        activity({ action: 'created', entity: 'plan', label: `Paid ${formatINR(pay.amount)} for ${p.kind} "${p.name}"` }),
+        activity({ action: 'created', entity: 'plan', label: `${p.name}: ${formatINR(pay.amount)}${pay.description ? ` · ${pay.description}` : ''}` }),
       ]);
     },
     updatePlanPayment: async (planId, paymentId, input) => {

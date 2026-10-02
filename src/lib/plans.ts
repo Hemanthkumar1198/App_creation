@@ -9,10 +9,10 @@ export const PLAN_FREQ: { value: PlanFrequency; label: string; months: number; p
   { value: 'quarterly', label: 'Quarterly', months: 3, perYear: 4 },
   { value: 'half-yearly', label: 'Half-yearly', months: 6, perYear: 2 },
   { value: 'yearly', label: 'Yearly', months: 12, perYear: 1 },
-  { value: 'one-time', label: 'One-time', months: 0, perYear: 0 },
+  { value: 'one-time', label: 'No fixed schedule', months: 0, perYear: 0 },
 ];
 
-export const isInsurance = (k: PlanKind) => /Insurance|LIC/.test(k);
+export const isInsurance = (k: string) => /insurance|lic\b|policy/i.test(k);
 
 export interface PlanSummary {
   totalPaid: number;
@@ -34,7 +34,9 @@ export function computePlan(plan: Plan, asOf: string = todayISO()): PlanSummary 
   const last = pays.length ? pays[pays.length - 1] : null;
   const ended = !!plan.endDate && plan.endDate < asOf;
   let nextDueDate: string | null = null;
-  if (!ended) {
+  // Free-form records (no fixed amount or schedule) just collect entries — no due dates.
+  const scheduled = plan.amount > 0 && freq.months > 0;
+  if (!ended && (scheduled || (plan.amount > 0 && !last))) {
     if (!last) nextDueDate = plan.startDate;
     else if (freq.months) nextDueDate = addMonths(last.date, freq.months);
     if (nextDueDate && plan.endDate && nextDueDate > plan.endDate) nextDueDate = null;

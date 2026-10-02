@@ -12,7 +12,7 @@ import { PLAN_FREQ, PLAN_KINDS, computePlan } from '../../lib/plans';
 import { useSave } from '../../lib/useSave';
 import { useStore } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
-import type { PaymentMethod, PlanFrequency, PlanKind } from '../../types';
+import type { PaymentMethod, PlanFrequency } from '../../types';
 
 const NOTE_TEMPLATES = ['Paddy harvest', 'House construction', 'Farming', 'Wedding', 'Vehicle repair', 'Business stock', 'Trip'];
 
@@ -202,7 +202,7 @@ export function PlanForm({ editId, onClose }: { editId?: string; onClose: () => 
   const { saving, run } = useSave();
   const [f, setF] = useState({
     name: existing?.name ?? '',
-    kind: (existing?.kind ?? 'SIP') as PlanKind,
+    kind: existing?.kind ?? 'SIP',
     provider: existing?.provider ?? '',
     policyNumber: existing?.policyNumber ?? '',
     amount: existing ? String(existing.amount) : '',
@@ -216,9 +216,10 @@ export function PlanForm({ editId, onClose }: { editId?: string; onClose: () => 
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => (setF((p) => ({ ...p, [k]: v })), setError(''));
 
   const save = async () => {
-    if (!f.name.trim()) return setError('Enter a name, e.g. "HDFC Index Fund SIP"');
+    if (!f.name.trim()) return setError('Enter any name, e.g. "HDFC Index Fund SIP", "Gold savings", "Chit fund"');
+    if (!f.kind.trim()) return setError('Choose or type a type');
     const amount = round2(parseFloat(f.amount) || 0);
-    if (!(amount > 0)) return setError('Enter the instalment / premium amount');
+    if (amount < 0) return setError('Amount cannot be negative');
     if (f.endDate && f.endDate <= f.startDate) return setError('End date must be after the start date');
     const payload = {
       name: f.name,
@@ -242,7 +243,7 @@ export function PlanForm({ editId, onClose }: { editId?: string; onClose: () => 
         const out = await addPlan(payload);
         id = out.id;
         return out;
-      }, `${f.kind} "${f.name.trim()}" added`)
+      }, `"${f.name.trim()}" created`)
     ) {
       onClose();
       navigate(`/investments/${id}`);
@@ -254,21 +255,21 @@ export function PlanForm({ editId, onClose }: { editId?: string; onClose: () => 
   return (
     <Sheet
       wide
-      title={existing ? 'Edit plan' : 'Add SIP / insurance / investment'}
-      subtitle="Track every instalment or premium you pay"
+      title={existing ? 'Edit record' : 'New investment / insurance record'}
+      subtitle="Give it any name. Add entries inside it, just like monthly expenses."
       onClose={onClose}
       footer={
         <div className="flex gap-2">
           <button className="btn-secondary flex-1" onClick={onClose}>
             Cancel
           </button>
-          <SaveButton saving={saving} label={existing ? 'Save changes' : 'Add plan'} onClick={save} />
+          <SaveButton saving={saving} label={existing ? 'Save changes' : 'Create'} onClick={save} />
         </div>
       }
     >
       <div className="space-y-4">
         <div>
-          <span className="label">Type</span>
+          <span className="label">Type (pick one or type your own)</span>
           <div className="flex flex-wrap gap-2">
             {PLAN_KINDS.map((k) => (
               <button key={k} type="button" className={clsx('chip', f.kind === k ? 'chip-on' : 'chip-off')} onClick={() => set('kind', k)}>
@@ -276,6 +277,7 @@ export function PlanForm({ editId, onClose }: { editId?: string; onClose: () => 
               </button>
             ))}
           </div>
+          <input className="input mt-2" placeholder="Or type any type, e.g. Chit fund, Post office, Crypto" value={(PLAN_KINDS as string[]).includes(f.kind) ? '' : f.kind} onChange={(e) => set('kind', e.target.value || 'Other')} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name">
@@ -284,8 +286,8 @@ export function PlanForm({ editId, onClose }: { editId?: string; onClose: () => 
           <Field label={insurance ? 'Insurer' : 'Provider / AMC'}>
             <input className="input" placeholder={insurance ? 'e.g. LIC, HDFC Life' : 'e.g. Zerodha, Groww, SBI MF'} value={f.provider} onChange={(e) => set('provider', e.target.value)} />
           </Field>
-          <Field label={insurance ? 'Premium amount (₹)' : 'Instalment amount (₹)'}>
-            <input className="input num text-base font-semibold" type="number" inputMode="decimal" min="0" placeholder="5000" value={f.amount} onChange={(e) => set('amount', e.target.value)} />
+          <Field label={insurance ? 'Regular premium (₹, optional)' : 'Regular instalment (₹, optional)'} hint="Leave empty if the amount varies: just add entries.">
+            <input className="input num text-base font-semibold" type="number" inputMode="decimal" min="0" placeholder="e.g. 5000" value={f.amount} onChange={(e) => set('amount', e.target.value)} />
           </Field>
           <Field label="How often">
             <select className="input" value={f.frequency} onChange={(e) => set('frequency', e.target.value as PlanFrequency)}>
@@ -328,7 +330,8 @@ export function PlanPaymentForm({ planId, editId, onClose }: { planId: string; e
   const { saving, run } = useSave();
   const existing = plan?.payments.find((p) => p.id === editId);
   const summary = plan ? computePlan(plan) : null;
-  const [amount, setAmount] = useState(existing ? String(existing.amount) : plan ? String(plan.amount) : '');
+  const [amount, setAmount] = useState(existing ? String(existing.amount) : plan && plan.amount > 0 ? String(plan.amount) : '');
+  const [description, setDescription] = useState(existing?.description ?? '');
   const [date, setDate] = useState(existing?.date ?? (summary?.nextDueDate && summary.nextDueDate <= todayISO() ? todayISO() : todayISO()));
   const [method, setMethod] = useState<PaymentMethod>(existing?.paymentMethod ?? lastMethod);
   const [notes, setNotes] = useState(existing?.notes ?? '');
@@ -336,17 +339,22 @@ export function PlanPaymentForm({ planId, editId, onClose }: { planId: string; e
   if (!plan || !summary) return null;
   const value = round2(parseFloat(amount) || 0);
 
-  const save = async () => {
-    if (!(value > 0)) return setError('Enter the amount paid');
-    const payload = { amount: value, date, paymentMethod: method, notes };
-    const ok = existing ? await run(() => update(plan.id, existing.id, payload), 'Payment updated') : await run(() => add(plan.id, payload), `Paid ${formatINR(value)} for ${plan.name}`);
-    if (ok) onClose();
+  const save = async (another = false) => {
+    if (!(value > 0)) return setError('Enter the amount');
+    const payload = { amount: value, date, paymentMethod: method, description, notes };
+    const ok = existing ? await run(() => update(plan.id, existing.id, payload), 'Entry updated') : await run(() => add(plan.id, payload), `${formatINR(value)} added to ${plan.name}`);
+    if (!ok) return;
+    if (another) {
+      setAmount(plan.amount > 0 ? String(plan.amount) : '');
+      setDescription('');
+      setNotes('');
+    } else onClose();
   };
 
   return (
     <Sheet
-      title={existing ? 'Edit payment' : 'Record payment'}
-      subtitle={`${plan.kind} · ${plan.name}`}
+      title={existing ? 'Edit entry' : `Add entry to ${plan.name}`}
+      subtitle={plan.kind}
       onClose={onClose}
       footer={
         <div className="flex gap-2">
@@ -355,35 +363,49 @@ export function PlanPaymentForm({ planId, editId, onClose }: { planId: string; e
               className="btn-secondary text-rose-600"
               aria-label="Remove payment"
               onClick={async () => {
-                if (await confirm({ title: 'Remove this payment?', message: `${formatINR(existing.amount)} on ${formatDate(existing.date)} will be removed (a copy is kept in history).`, confirmLabel: 'Remove', danger: true }))
-                  if (await run(() => remove(plan.id, existing.id), 'Payment removed')) onClose();
+                if (await confirm({ title: 'Remove this entry?', message: `${formatINR(existing.amount)} on ${formatDate(existing.date)} will be removed (a copy is kept in history).`, confirmLabel: 'Remove', danger: true }))
+                  if (await run(() => remove(plan.id, existing.id), 'Entry removed')) onClose();
               }}
             >
               <Trash2 size={16} />
             </button>
           )}
-          <button className="btn-secondary flex-1" onClick={onClose}>
-            Cancel
-          </button>
-          <SaveButton saving={saving} label={existing ? 'Save changes' : 'Save payment'} onClick={save} />
+          {existing ? (
+            <button className="btn-secondary flex-1" onClick={onClose}>
+              Cancel
+            </button>
+          ) : (
+            <button className="btn-secondary flex-1" disabled={saving} onClick={() => save(true)}>
+              Save & add another
+            </button>
+          )}
+          <SaveButton saving={saving} label={existing ? 'Save changes' : 'Save'} onClick={() => save(false)} />
         </div>
       }
     >
       <div className="space-y-4">
-        {!existing && summary.nextDueDate && (
+        {!existing && summary.nextDueDate && plan.amount > 0 && (
           <p className={clsx('rounded-2xl p-3 text-sm', summary.overdue ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-slate-50 dark:bg-white/5')}>
             Due {formatDate(summary.nextDueDate)} · {formatINR(plan.amount)}
           </p>
         )}
         <div>
-          <label className="label" htmlFor="pp-amount">Amount paid</label>
+          <label className="label" htmlFor="pp-amount">Amount</label>
           <div className="flex items-center rounded-2xl border-2 border-slate-200 px-4 focus-within:border-brand-500 dark:border-white/10">
             <span className="text-2xl font-bold text-brand-600">₹</span>
             <input id="pp-amount" autoFocus type="number" inputMode="decimal" min="0" step="0.01" value={amount} onChange={(e) => (setAmount(e.target.value), setError(''))} className="num w-full bg-transparent px-2 py-3 text-2xl font-bold outline-none" />
           </div>
         </div>
+        <Field label="What for (optional)">
+          <input className="input" placeholder="e.g. SIP October, Premium 2026, Gold coin" value={description} onChange={(e) => setDescription(e.target.value)} list="pp-suggest" />
+          <datalist id="pp-suggest">
+            {[...new Set(plan.payments.map((p) => p.description).filter(Boolean))].slice(0, 20).map((d) => (
+              <option key={d} value={d} />
+            ))}
+          </datalist>
+        </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Date paid">
+          <Field label="Date">
             <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value || todayISO())} />
           </Field>
           <Field label="Payment method">

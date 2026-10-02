@@ -453,6 +453,8 @@ The **end date** is the earliest of: today, the manual *Interest calculation end
 
 **Calculation Notes** (`/notes`) are separate calculation books for one purpose, e.g. *Paddy harvest 2026* or *House construction*. Each has entries marked **Spent** or **Received** (date, what for, amount, notes). The book shows total spent, total received, profit/net cost, and a "spent on" breakdown grouped by description (e.g. Labour ₹5,500), with CSV export. Notes are **not** counted in daily income/expenses. Stored in `users/{uid}/notes/{id}` with entries embedded.
 
+**Flexible:** create any number of calculations and records with any name ("+ New calculation" / "+ New record" on every page, plus an "add another" tile in each list). Investment records can have any type (pick SIP, LIC… or type your own, e.g. *Chit fund*). The regular amount and schedule are optional; leave them empty and just **Add entry** (what for, amount, date), like monthly expenses. Entries are grouped by month with monthly totals.
+
 **Investments & Insurance** (`/investments`) tracks SIP, mutual funds, LIC, term/health/vehicle insurance, PPF, FD/RD and gold. Each plan has a type, provider, instalment/premium, frequency, start/end date, policy/folio number, cover/target and notes, plus a payment history. **Next due** = last payment + one period (or the start date before the first payment). The page shows paid this year, invested vs premiums (all time), yearly commitment, and payments due in the next 30 days with a **Pay** button. Due and overdue payments appear under the 🔔 bell. Stored in `users/{uid}/plans/{id}`.
 
 Both use the same safety model: soft delete to Trash, version history, and no deletes allowed by the rules. Both are exported as their own sections.
