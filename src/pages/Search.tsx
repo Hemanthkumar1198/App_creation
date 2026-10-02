@@ -44,7 +44,9 @@ export default function Search() {
   const [category, setCategory] = useState('');
   const [method, setMethod] = useState('');
   const [input, setInput] = useState(q);
-  useEffect(() => setInput(q), [q]);
+  useEffect(() => {
+    setInput(q);
+  }, [q]);
 
   const inDate = (d: string) => (!from || d >= from) && (!to || d <= to);
 

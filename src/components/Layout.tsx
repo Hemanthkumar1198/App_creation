@@ -283,7 +283,10 @@ function SidebarCard() {
 export function Layout({ children }: { children: ReactNode }) {
   const [mobileSearch, setMobileSearch] = useState(false);
   const loc = useLocation();
-  useEffect(() => window.scrollTo(0, 0), [loc.pathname]);
+  // Braces matter: newer browsers return a Promise from scrollTo, which React would try to call as a cleanup.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [loc.pathname]);
 
   return (
     <div className="min-h-screen lg:pl-64">
