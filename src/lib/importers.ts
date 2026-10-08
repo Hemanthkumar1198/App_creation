@@ -176,7 +176,7 @@ export function alignColumns(lines: PdfItem[][]): string[][] {
 
 /* -------------------------------------------------------- field mapping */
 
-export type ImportTarget = 'transactions' | 'loans';
+export type ImportTarget = 'transactions' | 'loans' | 'note' | 'plan';
 
 export type TxField = 'date' | 'description' | 'amount' | 'debit' | 'credit' | 'type' | 'category' | 'paymentMethod' | 'notes';
 export type LoanField = 'borrower' | 'phone' | 'principal' | 'startDate' | 'dueDate' | 'interestRate' | 'repaid' | 'notes';
@@ -387,6 +387,7 @@ const CATEGORY_RULES: [RegExp, string][] = [
   [/swiggy|zomato|food|grocer|restaurant|cafe|bigbasket|blinkit|zepto|dmart|milk|vegetable|dinner|lunch|breakfast/i, 'Food'],
   [/amazon|flipkart|myntra|ajio|meesho|shopping|cloth|mall|nykaa/i, 'Shopping'],
   [/uber|ola|rapido|irctc|train|flight|bus|metro|travel|makemytrip|redbus|cab|taxi|toll|fastag/i, 'Travel'],
+  [/utilit|wifi|wi-fi|internet/i, 'Bills'],
   [/electric|bescom|water bill|gas bill|broadband|wifi|recharge|airtel|jio|vodafone|\bvi\b|dth|bill|emi|insurance|lic/i, 'Bills'],
   [/movie|netflix|prime video|hotstar|spotify|bookmyshow|entertain|game/i, 'Entertainment'],
   [/medical|pharma|hospital|clinic|doctor|apollo|medplus|medicine|health/i, 'Medical'],
@@ -666,4 +667,15 @@ export function draftsToLoans(drafts: LoanDraft[], rateUnit: 'monthly' | 'yearly
     }
     return loan;
   });
+}
+
+/** A friendly default name from the entries' dates, e.g. "Apr 2026" or "Jan–Mar 2026". */
+export function suggestNameFromDates(dates: string[], fallback: string): string {
+  const ms = [...new Set(dates.filter(Boolean).map((d) => d.slice(0, 7)))].sort();
+  if (!ms.length) return fallback;
+  const label = (ym: string) => new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1).toLocaleString('en-IN', { month: 'short' });
+  const first = ms[0];
+  const last = ms[ms.length - 1];
+  if (first === last) return `${label(first)} ${first.slice(0, 4)}`;
+  return first.slice(0, 4) === last.slice(0, 4) ? `${label(first)}–${label(last)} ${last.slice(0, 4)}` : `${label(first)} ${first.slice(0, 4)} – ${label(last)} ${last.slice(0, 4)}`;
 }

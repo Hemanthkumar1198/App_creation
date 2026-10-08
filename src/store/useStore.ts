@@ -72,6 +72,10 @@ interface State extends DataSnapshot {
   updateNoteEntry: (noteId: string, entryId: string, input: NoteEntryInput) => Result;
   deleteNoteEntry: (noteId: string, entryId: string) => Result;
 
+  /** Import entries into an existing calculation note, or a new one with the given name. */
+  importNoteEntries: (target: { id?: string; name: string }, entries: NoteEntryInput[], label: string) => Promise<{ id: string; result: CommitResult }>;
+  /** Import entries into an existing investment record, or a new one with the given name. */
+  importPlanEntries: (target: { id?: string; name: string; kind: string }, entries: PlanPaymentInput[], label: string) => Promise<{ id: string; result: CommitResult }>;
   addPlan: (input: PlanInput) => Promise<{ id: string; result: CommitResult }>;
   updatePlan: (id: string, input: PlanInput) => Result;
   deletePlan: (id: string) => Result;
@@ -423,6 +427,39 @@ export const useStore = create<State>()((_set, get) => {
         { kind: 'note', op: 'put', doc: { ...n, updatedAt: nowISO(), entries: n.entries.filter((x) => x.id !== entryId) } },
         activity({ action: 'deleted', entity: 'note', label: `${n.name}: removed ${e ? formatINR(e.amount) : 'entry'} (kept in history)` }),
       ]);
+    },
+
+    importNoteEntries: async (target, entries, label) => {
+      const now = nowISO();
+      const clean = entries.map((e) => ({ ...cleanEntry(e), id: uid(), createdAt: now }));
+      let note: CalcNote;
+      if (target.id) {
+        const n = findNote(target.id);
+        note = { ...n, updatedAt: now, entries: [...n.entries, ...clean] };
+      } else {
+        if (!target.name.trim()) throw new ValidationError('Give the calculation a name');
+        note = { id: uid(), name: target.name.trim().slice(0, 80), description: '', entries: clean, createdAt: now, updatedAt: now };
+      }
+      const result = await commit([{ kind: 'note', op: 'put', doc: note }, activity({ action: 'imported', entity: 'note', label })]);
+      return { id: note.id, result };
+    },
+    importPlanEntries: async (target, entries, label) => {
+      const now = nowISO();
+      const clean = entries.map((e) => ({ ...cleanPayment(e), id: uid(), createdAt: now }));
+      let plan: Plan;
+      if (target.id) {
+        const p = findPlan(target.id);
+        plan = { ...p, updatedAt: now, payments: [...p.payments, ...clean] };
+      } else {
+        if (!target.name.trim()) throw new ValidationError('Give the record a name');
+        const first = clean.reduce((a, e) => (e.date < a ? e.date : a), clean[0]?.date ?? now.slice(0, 10));
+        plan = {
+          id: uid(), name: target.name.trim().slice(0, 80), kind: (target.kind || 'Other').slice(0, 30), provider: '', policyNumber: '',
+          amount: 0, frequency: 'one-time', startDate: first, notes: '', payments: clean, createdAt: now, updatedAt: now,
+        };
+      }
+      const result = await commit([{ kind: 'plan', op: 'put', doc: plan }, activity({ action: 'imported', entity: 'plan', label })]);
+      return { id: plan.id, result };
     },
 
     /* ---------------------------------------- investments & insurance */

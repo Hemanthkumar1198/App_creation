@@ -203,13 +203,15 @@ Daily / Weekly / Monthly / Yearly with previous/next navigation.
 **Import data** → choose a file → check settings → preview → **Import**. **Nothing is saved until you confirm.**
 
 1. **File:** `.xlsx`, `.csv` or text-based `.pdf` (up to 15 MB / 5,000 rows). Old `.xls` → save as `.xlsx`/CSV first. Scanned image PDFs can't be read.
-2. **Settings:** sheet, *Import as* (Income & expenses / Interest records), header row (auto-detected), date format (DD/MM default), column mapping (auto-matched, adjustable), the default type for unsigned amounts, and whether rates are % per month or per year.
+2. **Settings:** sheet, **Save into**: *Daily expenses / income* (monthly books, by each entry's own date), *Interest records*, *Calculation note* or *Investment record*. For a note or record choose **Add to → + New** (with an **editable name**, suggested from the dates, e.g. "Apr 2026 expenses") or an existing one. Then header row (auto-detected), date format (DD/MM default), column mapping (auto-matched, adjustable), the default type for unsigned amounts, and whether rates are % per month or per year.
 3. **Preview:** every row is *Ready*, *Duplicate* (skipped unless ticked) or *Needs fixing* (with the reason). Cells are editable.
 
 **CashBook-app exports** (columns *Date, Time, Remark, Entry by, Mode, Cash In, Cash Out, Balance*) are supported:
 - If the file name contains *intrest / interest / loan / lend / udhar…* (e.g. `My_intrest_savings_…CashBook.csv`), it is imported as **Interest records** automatically: **Remark → person** (name cleaned, e.g. "Devraj shetty (vivek) 09 jun in google pay" → *Devraj shetty*; the full remark is kept in notes), **Cash Out → amount lent**, **Date → date lent**.
 - Options for interest records: **Interest % if not in file** (applied to every row) and **Due after (months)** (default 12).
 - Other CashBook files import as income & expenses (Remark → description, Cash In/Cash Out → type and amount, Mode → payment method).
+
+**Where did my entries go?** Daily-expense imports are placed by date. An April file goes into the **Apr 2026** book (Cashbook → Monthly books), not the current month on the Dashboard. The finish screen says where they went and links straight to it.
 
 **Undo an import:** Settings → **Recent imports** → **Undo import** moves the whole batch to Trash (restorable). Use it if a file went into the wrong section.
 
@@ -601,6 +603,7 @@ VITE_FIREBASE_EMULATOR=true npm run dev
 | 02 Oct 2026 | Receive Interest with history and next due; all-borrowers list with edit; Monthly books with day-wise month view |
 | 02 Oct 2026 | Data safety: no permanent deletes (server-enforced), version history; installable offline app (precache, icons, Install button); separate Cash In / Cash Out books |
 | 02 Oct 2026 | Calculation Notes and Investments & Insurance; "Loans" renamed to **Interest Calculation**; phone menu Home · Cashbook · Interest · Notes · More |
+| 08 Oct 2026 | Import "Save into": daily expenses, interest records, **calculation note** or **investment record** (new with an editable name, or existing); finish screen links to the month/record; "Utilities" → Bills |
 | 08 Oct 2026 | Import: CashBook exports of money lent go to **Interest records** (Remark → name, Cash Out → amount); default interest % and due months; **Undo import** in Settings |
 | 08 Oct 2026 | Dashboard: top card shows **this month's** Cash In and Cash Out separately; new **All Cash In & Cash Out** section with month-by-month totals |
 | 02 Oct 2026 | Notes & Investments made fully flexible: unlimited records, any name/type, optional amount, entries grouped by month |

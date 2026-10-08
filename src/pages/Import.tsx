@@ -1,6 +1,6 @@
 import clsx from 'clsx';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileSpreadsheet, FileUp, HandCoins, Loader2, ReceiptText, Upload } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileSpreadsheet, FileUp, HandCoins, Loader2, NotebookPen, ReceiptText, TrendingUp, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeader, Segmented } from '../components/ui/common';
 import { CATEGORIES, PAYMENT_METHODS } from '../lib/categories';
@@ -19,6 +19,7 @@ import {
   parseCSV,
   parsePdf,
   parseXlsx,
+  suggestNameFromDates,
   typeFromSheetName,
   TX_FIELDS,
   validateLoanDraft,
@@ -80,7 +81,16 @@ export default function ImportData() {
   const [page, setPage] = useState(0);
   const [parsing, setParsing] = useState(false);
   const [error, setError] = useState('');
-  const [doneCount, setDoneCount] = useState<{ n: number; target: ImportTarget } | null>(null);
+  const [doneCount, setDoneCount] = useState<{ n: number; target: ImportTarget; link: string; linkLabel: string; where: string } | null>(null);
+  // Destination for "Calculation note" / "Investment record" imports: an existing one, or a new one with an editable name.
+  const [destId, setDestId] = useState('');
+  const [destName, setDestName] = useState('');
+  const [nameTouched, setNameTouched] = useState(false);
+  const [planKind, setPlanKind] = useState('Other');
+  const notesAll = useStore((s) => s.notes);
+  const plansAll = useStore((s) => s.plans);
+  const importNoteEntries = useStore((s) => s.importNoteEntries);
+  const importPlanEntries = useStore((s) => s.importPlanEntries);
 
   const table = tables[sheet];
   const headers = useMemo(() => (table?.rows[headerRow] ?? []).map((h, i) => h || `Column ${i + 1}`), [table, headerRow]);
@@ -100,6 +110,8 @@ export default function ImportData() {
     setSheet(idx);
     setHeaderRow(h);
     setTarget(tgt);
+    setDestId('');
+    setNameTouched(false);
     setTxMap(autoMap(t.rows[h] ?? [], TX_FIELDS.map((f) => f.key)));
     setLoanMap(autoMap(t.rows[h] ?? [], LOAN_FIELDS.map((f) => f.key)));
     setDefaultType(typeFromSheetName(t.name) ?? 'expense');
@@ -136,12 +148,31 @@ export default function ImportData() {
     }
   };
 
+  const isEntries = target !== 'loans';
+  const existingForDup = useMemo(() => {
+    if (target === 'transactions') return txsAll;
+    const asTx = (date: string, type: 'income' | 'expense', amount: number, description: string) =>
+      ({ id: '', type, amount, date, description, category: '', paymentMethod: 'Other', notes: '', createdAt: '', updatedAt: '' }) as (typeof txsAll)[number];
+    if (target === 'note' && destId) return (notesAll.find((n) => n.id === destId)?.entries ?? []).map((e) => asTx(e.date, e.type === 'in' ? 'income' : 'expense', e.amount, e.description));
+    if (target === 'plan' && destId) return (plansAll.find((p) => p.id === destId)?.payments ?? []).map((e) => asTx(e.date, 'expense', e.amount, e.description ?? ''));
+    return [];
+  }, [target, destId, txsAll, notesAll, plansAll]);
+
   const txDrafts = useMemo(() => {
-    if (target !== 'transactions' || !table) return [];
+    if (!isEntries || !table) return [];
     const base = buildTxDrafts(dataRows, txMap, { dateOrder, defaultType, knownCategories: CATEGORIES.map((c) => c.name) });
     const edited = base.map((d) => (txEdits[d.row] ? validateTxDraft({ ...d, ...txEdits[d.row] }) : d));
-    return markTxDuplicates(edited, txsAll);
-  }, [target, table, dataRows, txMap, dateOrder, defaultType, txEdits, txsAll]);
+    return markTxDuplicates(edited, existingForDup);
+  }, [isEntries, table, dataRows, txMap, dateOrder, defaultType, txEdits, existingForDup]);
+
+  // Suggest a name from the entries' dates (e.g. "Apr 2026 expenses") until the user edits it.
+  const suggestedName = useMemo(() => {
+    const base = suggestNameFromDates(txDrafts.map((d) => d.date), fileName.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').replace(/\(\d+\)/g, '').trim());
+    return target === 'plan' ? base : `${base} expenses`;
+  }, [txDrafts, fileName, target]);
+  useEffect(() => {
+    if (!nameTouched) setDestName(suggestedName);
+  }, [suggestedName, nameTouched]);
 
   const loanDrafts = useMemo(() => {
     if (target !== 'loans' || !table) return [];
@@ -150,7 +181,7 @@ export default function ImportData() {
     return markLoanDuplicates(edited, loansAll);
   }, [target, table, dataRows, loanMap, dateOrder, loanEdits, loansAll, defaultRate, termMonths]);
 
-  const drafts: (TxDraft | LoanDraft)[] = target === 'transactions' ? txDrafts : loanDrafts;
+  const drafts: (TxDraft | LoanDraft)[] = isEntries ? txDrafts : loanDrafts;
   const isIncluded = (d: { row: number; status: string }) => d.status !== 'error' && (excluded[d.row] ?? d.status === 'duplicate') === false;
   const selected = drafts.filter(isIncluded);
   const counts = {
@@ -162,20 +193,51 @@ export default function ImportData() {
   const pages = Math.max(1, Math.ceil(drafts.length / PAGE));
   const visible = drafts.slice(page * PAGE, page * PAGE + PAGE);
 
-  const hasAmount = target === 'transactions' ? txMap.amount !== undefined || txMap.debit !== undefined || txMap.credit !== undefined : loanMap.principal !== undefined;
-  const hasRequired = target === 'transactions' ? txMap.date !== undefined && hasAmount : loanMap.borrower !== undefined && loanMap.principal !== undefined && loanMap.startDate !== undefined;
+  const hasAmount = isEntries ? txMap.amount !== undefined || txMap.debit !== undefined || txMap.credit !== undefined : loanMap.principal !== undefined;
+  const hasRequired = isEntries ? txMap.date !== undefined && hasAmount : loanMap.borrower !== undefined && loanMap.principal !== undefined && loanMap.startDate !== undefined;
+  const needsName = (target === 'note' || target === 'plan') && !destId && !destName.trim();
+  const NOUN: Record<ImportTarget, string> = { transactions: 'transactions', loans: 'interest records', note: 'entries', plan: 'entries' };
 
   const confirmImport = async () => {
-    const label = `Imported ${selected.length} ${target === 'transactions' ? 'transactions' : 'interest records'} from ${fileName}`;
-    const ok = await run(
-      () =>
-        target === 'transactions'
-          ? importRecords(draftsToTransactions(selected as TxDraft[]), [], label)
-          : importRecords([], draftsToLoans(selected as LoanDraft[], rateUnit), label),
-      `${selected.length} records imported`,
-    );
+    const label = `Imported ${selected.length} ${NOUN[target]} from ${fileName}`;
+    let done = { link: '/transactions', linkLabel: 'View transactions', where: '' };
+    const ok = await run(async () => {
+      if (target === 'transactions') {
+        const txs = draftsToTransactions(selected as TxDraft[]);
+        const months = [...new Set(txs.map((t) => t.date.slice(0, 7)))].sort();
+        const top = months[months.length - 1];
+        const anyIncome = txs.some((t) => t.type === 'income') && !txs.some((t) => t.type === 'expense');
+        done = {
+          link: months.length === 1 ? `/transactions/month/${top}${anyIncome ? '?book=in' : ''}` : '/transactions',
+          linkLabel: months.length === 1 ? `Open ${suggestNameFromDates([top + '-01'], top)} book` : 'View monthly books',
+          where: `Saved by their dates into your monthly books: ${suggestNameFromDates(txs.map((t) => t.date), '')}.`,
+        };
+        return importRecords(txs, [], label);
+      }
+      if (target === 'loans') {
+        done = { link: '/loans', linkLabel: 'View interest records', where: '' };
+        return importRecords([], draftsToLoans(selected as LoanDraft[], rateUnit), label);
+      }
+      const rows = selected as TxDraft[];
+      if (target === 'note') {
+        const out = await importNoteEntries(
+          { id: destId || undefined, name: destName },
+          rows.map((d) => ({ date: d.date, type: d.type === 'income' ? 'in' : 'out', amount: d.amount, description: d.description || d.category, notes: d.notes })),
+          label,
+        );
+        done = { link: `/notes/${out.id}`, linkLabel: 'Open calculation', where: `Saved into the calculation "${destId ? notesAll.find((n) => n.id === destId)?.name : destName.trim()}".` };
+        return out;
+      }
+      const out = await importPlanEntries(
+        { id: destId || undefined, name: destName, kind: planKind },
+        rows.map((d) => ({ date: d.date, amount: d.amount, description: d.description || d.category, paymentMethod: d.paymentMethod, notes: d.notes })),
+        label,
+      );
+      done = { link: `/investments/${out.id}`, linkLabel: 'Open record', where: `Saved into the record "${destId ? plansAll.find((p) => p.id === destId)?.name : destName.trim()}".` };
+      return out;
+    }, `${selected.length} records imported`);
     if (ok) {
-      setDoneCount({ n: selected.length, target });
+      setDoneCount({ n: selected.length, target, ...done });
       setStep('done');
     }
   };
@@ -191,8 +253,9 @@ export default function ImportData() {
         </div>
         <h2 className="text-xl font-bold">Import complete</h2>
         <p className="mt-1 text-slate-500 dark:text-slate-400">
-          {doneCount.n} {doneCount.target === 'transactions' ? 'transactions' : 'interest records'} were saved.
+          {doneCount.n} {NOUN[doneCount.target]} were saved.
         </p>
+        {doneCount.where && <p className="mt-2 rounded-2xl bg-slate-50 p-3 text-sm dark:bg-white/5">{doneCount.where}</p>}
         <div className="mt-6 flex justify-center gap-2">
           <button
             className="btn-secondary"
@@ -204,8 +267,8 @@ export default function ImportData() {
           >
             Import another file
           </button>
-          <Link to={doneCount.target === 'transactions' ? '/transactions' : '/loans'} className="btn-primary">
-            View {doneCount.target === 'transactions' ? 'transactions' : 'interest records'}
+          <Link to={doneCount.link} className="btn-primary">
+            {doneCount.linkLabel}
           </Link>
         </div>
       </div>
@@ -288,20 +351,79 @@ export default function ImportData() {
             </div>
 
             <div className="grid gap-4 lg:grid-cols-3">
-              <div>
-                <span className="label">Import as</span>
-                <Segmented
-                  className="w-full"
-                  value={target}
-                  onChange={(v) => {
-                    setTarget(v);
-                    resetDerived();
-                  }}
-                  options={[
-                    { value: 'transactions', label: <span className="flex items-center justify-center gap-1.5"><ReceiptText size={14} /> Income & expenses</span> },
-                    { value: 'loans', label: <span className="flex items-center justify-center gap-1.5"><HandCoins size={14} /> Interest records (money lent)</span> },
-                  ]}
-                />
+              <div className="lg:col-span-3">
+                <span className="label">Save into</span>
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                  {(
+                    [
+                      ['transactions', 'Daily expenses / income', 'Monthly books (Cashbook)', ReceiptText],
+                      ['loans', 'Interest records', 'Money lent to people', HandCoins],
+                      ['note', 'Calculation note', 'e.g. April expenses, paddy', NotebookPen],
+                      ['plan', 'Investment record', 'SIP, LIC, gold, chit…', TrendingUp],
+                    ] as const
+                  ).map(([v, t, d, Icon]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => {
+                        setTarget(v);
+                        setDestId('');
+                        resetDerived();
+                      }}
+                      className={clsx('rounded-2xl border p-3 text-left transition', target === v ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-500/20 dark:bg-brand-500/10' : 'border-slate-200 hover:border-slate-300 dark:border-white/10')}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-semibold">
+                        <Icon size={15} /> {t}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{d}</span>
+                    </button>
+                  ))}
+                </div>
+                {(target === 'note' || target === 'plan') && (
+                  <div className="mt-3 grid gap-3 rounded-2xl bg-slate-50 p-3 dark:bg-white/5 sm:grid-cols-2">
+                    <label className="text-sm">
+                      <span className="label">Add to</span>
+                      <select className="input" value={destId} onChange={(e) => setDestId(e.target.value)}>
+                        <option value="">+ New {target === 'note' ? 'calculation' : 'record'}</option>
+                        {(target === 'note' ? notesAll.filter((n) => !n.deletedAt) : plansAll.filter((p) => !p.deletedAt)).map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {!destId && (
+                      <label className="text-sm">
+                        <span className="label">Name (edit as you like)</span>
+                        <input
+                          className="input"
+                          value={destName}
+                          placeholder="e.g. April 2026 expenses"
+                          onChange={(e) => {
+                            setDestName(e.target.value);
+                            setNameTouched(true);
+                          }}
+                        />
+                      </label>
+                    )}
+                    {target === 'plan' && !destId && (
+                      <label className="text-sm sm:col-span-2">
+                        <span className="label">Type</span>
+                        <input className="input" list="imp-kinds" value={planKind} onChange={(e) => setPlanKind(e.target.value)} />
+                        <datalist id="imp-kinds">
+                          {['SIP', 'Mutual Fund', 'LIC', 'Term Insurance', 'Health Insurance', 'PPF', 'FD / RD', 'Gold', 'Chit fund', 'Other'].map((k) => (
+                            <option key={k} value={k} />
+                          ))}
+                        </datalist>
+                      </label>
+                    )}
+                  </div>
+                )}
+                {target === 'transactions' && txDrafts.length > 0 && (
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Entries go into your monthly books by their own dates: <b>{suggestNameFromDates(txDrafts.map((d) => d.date), '—')}</b>. The Dashboard shows only the current month.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="label" htmlFor="hdr">Header row</label>
@@ -344,8 +466,8 @@ export default function ImportData() {
             <div>
               <span className="label">Column mapping</span>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {(target === 'transactions' ? TX_FIELDS : LOAN_FIELDS).map((f) => {
-                  const map = (target === 'transactions' ? txMap : loanMap) as Record<string, number | undefined>;
+                {(isEntries ? TX_FIELDS : LOAN_FIELDS).map((f) => {
+                  const map = (isEntries ? txMap : loanMap) as Record<string, number | undefined>;
                   return (
                     <label key={f.key} className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 pl-3 text-sm dark:border-white/10">
                       <span className="min-w-0 flex-1 truncate font-medium" title={'hint' in f ? (f.hint as string) : undefined}>
@@ -356,7 +478,7 @@ export default function ImportData() {
                         value={map[f.key] ?? ''}
                         onChange={(e) => {
                           const v = e.target.value === '' ? undefined : Number(e.target.value);
-                          if (target === 'transactions') setTxMap((m) => ({ ...m, [f.key]: v }));
+                          if (isEntries) setTxMap((m) => ({ ...m, [f.key]: v }));
                           else setLoanMap((m) => ({ ...m, [f.key]: v }));
                           resetDerived();
                         }}
@@ -374,7 +496,7 @@ export default function ImportData() {
               </div>
               {!hasRequired && (
                 <p className="mt-2 text-sm font-medium text-amber-600">
-                  {target === 'transactions'
+                  {isEntries
                     ? 'Map the date and an amount (or debit/credit) column to continue.'
                     : 'Map borrower (e.g. the Remark / Name column), amount lent (e.g. Cash Out) and date lent to continue.'}
                 </p>
@@ -382,7 +504,7 @@ export default function ImportData() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              {target === 'transactions' ? (
+              {isEntries ? (
                 <div>
                   <span className="label">Amounts without a type are</span>
                   <Segmented
@@ -468,7 +590,7 @@ export default function ImportData() {
                 </div>
               </div>
               <div className="mt-3 overflow-x-auto">
-                {target === 'transactions' ? (
+                {isEntries ? (
                   <table className="w-full min-w-[900px] text-sm">
                     <thead>
                       <tr className="border-y border-slate-100 bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-white/5 dark:bg-white/[0.02]">
@@ -591,9 +713,9 @@ export default function ImportData() {
               )}
               <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white px-4 py-3 dark:border-white/5 dark:bg-ink-850 sm:px-5">
                 <span className="text-sm">
-                  <b>{selected.length}</b> {target === 'transactions' ? 'transactions' : 'interest records'} selected · {formatINR(selectedTotal)}
+                  <b>{selected.length}</b> {NOUN[target]} selected · {formatINR(selectedTotal)}
                 </span>
-                <button className="btn-primary" disabled={!selected.length || saving} onClick={confirmImport}>
+                <button className="btn-primary" disabled={!selected.length || saving || needsName} onClick={confirmImport}>
                   {saving ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} Import {selected.length} records
                 </button>
               </div>
