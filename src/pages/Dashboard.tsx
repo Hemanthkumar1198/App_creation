@@ -11,15 +11,14 @@ import {
   Percent,
   Plus,
   ReceiptText,
-  TrendingDown,
   TrendingUp,
-  Wallet,
+  CalendarDays,
   FileUp,
   Sparkles,
   NotebookPen,
   AlertCircle,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CategoryBars, IncomeExpenseChart, TrendArea } from '../components/charts/Charts';
 import { TransactionRow } from '../components/Rows';
@@ -71,6 +70,77 @@ function OtherTrackers() {
         </div>
         <ChevronRight size={18} className="text-slate-400" />
       </Link>
+    </section>
+  );
+}
+
+/** All-time Cash In and Cash Out, kept in two separate columns with month-by-month totals. */
+function AllCashInOut({
+  history,
+  totals,
+  counts,
+}: {
+  history: [string, { income: number; expense: number; inCount: number; outCount: number }][];
+  totals: { income: number; expense: number };
+  counts: { in: number; out: number };
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const cols = [
+    { key: 'in' as const, title: 'All Cash In', total: totals.income, count: counts.in, field: 'income' as const, cnt: 'inCount' as const, tone: 'text-emerald-600 dark:text-emerald-400', icon: ArrowDownLeft, iconCls: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300', sign: '+', link: '/transactions?book=in', allLink: '/transactions?view=all&type=income', q: '?book=in' },
+    { key: 'out' as const, title: 'All Cash Out', total: totals.expense, count: counts.out, field: 'expense' as const, cnt: 'outCount' as const, tone: 'text-rose-600 dark:text-rose-400', icon: ArrowUpRight, iconCls: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300', sign: '−', link: '/transactions', allLink: '/transactions?view=all&type=expense', q: '' },
+  ];
+  return (
+    <section>
+      <SectionTitle title="All Cash In & Cash Out" subtitle="All-time totals and every month, kept separate" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        {cols.map((c) => {
+          const rows = history.filter(([, m]) => m[c.cnt] > 0);
+          const visible = showAll ? rows : rows.slice(0, 6);
+          return (
+            <div key={c.key} className="card overflow-hidden">
+              <div className="flex items-center gap-3 border-b border-slate-100 p-4 dark:border-white/5">
+                <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${c.iconCls}`}>
+                  <c.icon size={20} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold">{c.title}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">{c.count} {c.count === 1 ? 'entry' : 'entries'} · all time</div>
+                </div>
+                <div className={`num text-xl font-extrabold ${c.tone}`}>{formatINR(c.total)}</div>
+              </div>
+              {rows.length === 0 ? (
+                <p className="px-4 py-6 text-center text-sm text-slate-500">No entries yet.</p>
+              ) : (
+                <div className="divide-y divide-slate-50 dark:divide-white/[0.03]">
+                  {visible.map(([ym, m]) => (
+                    <Link key={ym} to={`/transactions/month/${ym}${c.q}`} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-white/5">
+                      <span className="flex-1 font-medium">{formatMonth(ym)}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{m[c.cnt]} {m[c.cnt] === 1 ? 'entry' : 'entries'}</span>
+                      <span className={`num w-28 text-right font-semibold ${c.tone}`}>
+                        {c.sign}
+                        {formatINR(Math.round(m[c.field] * 100) / 100)}
+                      </span>
+                      <ChevronRight size={14} className="text-slate-400" />
+                    </Link>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-2.5 text-xs dark:border-white/5">
+                {rows.length > 6 ? (
+                  <button className="font-semibold text-brand-600 dark:text-brand-300" onClick={() => setShowAll((v) => !v)}>
+                    {showAll ? 'Show fewer months' : `Show all ${rows.length} months`}
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <Link to={c.allLink} className="font-semibold text-brand-600 dark:text-brand-300">
+                  All {c.key === 'in' ? 'Cash In' : 'Cash Out'} entries →
+                </Link>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -143,7 +213,26 @@ export default function Dashboard() {
       .slice(0, 5);
     const recent = [...liveTx].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt)).slice(0, 6);
     const cats = categoryBreakdown(liveTx, 'expense', startOfMonth(today), endOfMonth(today));
-    return { overall, month, pf, chart, upcoming, repayments, recent, cats };
+    const thisYm = today.slice(0, 7);
+    const monthIn = liveTx.filter((t) => t.type === 'income' && t.date.startsWith(thisYm)).length;
+    const monthOut = liveTx.filter((t) => t.type === 'expense' && t.date.startsWith(thisYm)).length;
+    // All-time history, month by month — Cash In and Cash Out kept apart.
+    const byMonth = new Map<string, { income: number; expense: number; inCount: number; outCount: number }>();
+    for (const t of liveTx) {
+      const k = t.date.slice(0, 7);
+      const m = byMonth.get(k) ?? { income: 0, expense: 0, inCount: 0, outCount: 0 };
+      if (t.type === 'income') {
+        m.income += t.amount;
+        m.inCount++;
+      } else {
+        m.expense += t.amount;
+        m.outCount++;
+      }
+      byMonth.set(k, m);
+    }
+    const history = [...byMonth.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+    const counts = { in: liveTx.filter((t) => t.type === 'income').length, out: liveTx.filter((t) => t.type === 'expense').length };
+    return { overall, month, pf, chart, upcoming, repayments, recent, cats, monthIn, monthOut, history, counts };
   }, [txs, loans, today]);
 
   const { overall, month, pf } = data;
@@ -164,24 +253,25 @@ export default function Dashboard() {
         <div className="pointer-events-none absolute -bottom-24 left-10 h-56 w-56 rounded-full bg-blue-400/20 blur-3xl" />
         <div className="relative grid gap-6 lg:grid-cols-[1.3fr_1fr] lg:items-end">
           <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-white/80">
-              <Wallet size={16} /> Current balance
+            <div className="flex items-center gap-2 text-sm font-medium text-white/85">
+              <CalendarDays size={16} /> This month · {formatMonth(today)}
             </div>
-            <div className="num mt-1 text-4xl font-extrabold tracking-tight sm:text-5xl">{formatINR(overall.balance)}</div>
-            <p className="mt-1 text-xs text-white/70">Personal income − expenses · loans are tracked separately</p>
-            <div className="mt-5 grid max-w-md grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-white/10 p-3 backdrop-blur">
-                <div className="flex items-center gap-1.5 text-xs text-white/80">
-                  <TrendingUp size={14} /> Total income
+            <p className="mt-0.5 text-xs text-white/70">Cash In and Cash Out are shown separately (not added together)</p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Link to={`/transactions/month/${today.slice(0, 7)}?book=in`} className="rounded-2xl bg-emerald-400/20 p-3.5 ring-1 ring-emerald-200/40 backdrop-blur transition hover:bg-emerald-400/30 sm:p-4">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-100">
+                  <ArrowDownLeft size={15} /> Cash In
                 </div>
-                <div className="num mt-0.5 font-bold">{formatINR(overall.income)}</div>
-              </div>
-              <div className="rounded-2xl bg-white/10 p-3 backdrop-blur">
-                <div className="flex items-center gap-1.5 text-xs text-white/80">
-                  <TrendingDown size={14} /> Total expenses
+                <div className="num mt-1 text-2xl font-extrabold tracking-tight sm:text-3xl">{formatINR(month.income)}</div>
+                <div className="mt-0.5 text-xs text-white/75">{data.monthIn} {data.monthIn === 1 ? 'entry' : 'entries'} →</div>
+              </Link>
+              <Link to={`/transactions/month/${today.slice(0, 7)}`} className="rounded-2xl bg-rose-400/20 p-3.5 ring-1 ring-rose-200/40 backdrop-blur transition hover:bg-rose-400/30 sm:p-4">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-100">
+                  <ArrowUpRight size={15} /> Cash Out
                 </div>
-                <div className="num mt-0.5 font-bold">{formatINR(overall.expense)}</div>
-              </div>
+                <div className="num mt-1 text-2xl font-extrabold tracking-tight sm:text-3xl">{formatINR(month.expense)}</div>
+                <div className="mt-0.5 text-xs text-white/75">{data.monthOut} {data.monthOut === 1 ? 'entry' : 'entries'} →</div>
+              </Link>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -210,21 +300,9 @@ export default function Dashboard() {
       {txs.length === 0 && loans.length === 0 && <GettingStarted />}
 
       {/* Personal vs lending — never mixed */}
-      <section className="grid gap-3 sm:grid-cols-3 sm:gap-4">
-        <StatCard label="Personal expenses (this month)" value={month.expense} icon={ArrowUpRight} tone="expense" hint={`All time ${formatINR(overall.expense)}`} />
+      <section className="grid grid-cols-2 gap-3 sm:gap-4">
         <StatCard label="Money lent (total)" value={pf.totalLent} icon={HandCoins} tone="loan" hint={`${pf.counts.total} loans · not counted as expense`} />
         <StatCard label="Outstanding loans" value={pf.outstanding} icon={Hourglass} tone="loan" hint={`Principal ${formatINR(pf.outstandingPrincipal)} + interest ${formatINR(pf.interestPending)}`} />
-      </section>
-
-      {/* Personal finance */}
-      <section>
-        <SectionTitle title="Personal finance" subtitle="Your income and daily expenses" action={<Link to="/transactions" className="text-xs font-semibold text-brand-600 dark:text-brand-300">Transactions →</Link>} />
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <StatCard label="This month's income" value={month.income} icon={ArrowDownLeft} tone="income" hint={formatMonth(today)} />
-          <StatCard label="This month's expenses" value={month.expense} icon={ArrowUpRight} tone="expense" hint={`Saved ${formatINR(month.net)}`} />
-          <StatCard label="Total income" value={overall.income} icon={TrendingUp} tone="income" hint="All time" />
-          <StatCard label="Total expenses" value={overall.expense} icon={TrendingDown} tone="expense" hint="All time" />
-        </div>
       </section>
 
       <OtherTrackers />
@@ -344,6 +422,7 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+      <AllCashInOut history={data.history} totals={{ income: overall.income, expense: overall.expense }} counts={data.counts} />
     </div>
   );
 }

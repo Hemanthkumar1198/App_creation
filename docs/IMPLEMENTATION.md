@@ -116,10 +116,10 @@ All amounts are in Indian Rupees (₹), with Indian digit grouping (₹1,00,000)
 
 ## 5. Dashboard
 
-- **Current balance** = personal income − personal expenses (interest records, notes and investments are excluded).
+- **Top card: this month only.** **Cash In** and **Cash Out** are shown as two separate totals with entry counts, never added together. Tap either to open this month's Cash In / Cash Out book.
 - Big buttons: **+ Cash In**, **− Cash Out**, **Add Interest Record**.
-- Cards: *Personal expenses (this month)* · *Money lent (total)* · *Outstanding interest records*.
-- Personal finance: this month's income/expenses, all-time totals.
+- Cards: *Money lent (total)* · *Outstanding interest records*.
+- **All Cash In & Cash Out** (lower on the page): two separate columns with all-time totals and entry counts, plus every month's total (latest 6 shown, *Show all months* for more). Tap a month to open its book, or *All Cash In / All Cash Out entries* to see the full lists.
 - Shortcuts to **Calculation Notes** (top calculations with totals) and **Investments & Insurance** (payments due this week / paid this year).
 - Charts: Income vs Expense (6 months), monthly expenses.
 - **Interest calculation summary**: Total Lent · Total Repaid · Interest Earned · Outstanding, plus counts of active / overdue / due soon / fully repaid.
@@ -594,4 +594,5 @@ VITE_FIREBASE_EMULATOR=true npm run dev
 | 02 Oct 2026 | Receive Interest with history and next due; all-borrowers list with edit; Monthly books with day-wise month view |
 | 02 Oct 2026 | Data safety: no permanent deletes (server-enforced), version history; installable offline app (precache, icons, Install button); separate Cash In / Cash Out books |
 | 02 Oct 2026 | Calculation Notes and Investments & Insurance; "Loans" renamed to **Interest Calculation**; phone menu Home · Cashbook · Interest · Notes · More |
+| 08 Oct 2026 | Dashboard: top card shows **this month's** Cash In and Cash Out separately; new **All Cash In & Cash Out** section with month-by-month totals |
 | 02 Oct 2026 | Notes & Investments made fully flexible: unlimited records, any name/type, optional amount, entries grouped by month |
