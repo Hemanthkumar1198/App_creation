@@ -7,6 +7,7 @@ export type SheetState =
   | { kind: 'loan'; editId?: string }
   | { kind: 'repayment'; loanId: string; editId?: string }
   | { kind: 'interest'; loanId: string }
+  | { kind: 'topup'; loanId: string; editId?: string }
   | { kind: 'note'; editId?: string }
   | { kind: 'note-entry'; noteId: string; editId?: string; entryType?: 'in' | 'out' }
   | { kind: 'plan'; editId?: string }

@@ -2,7 +2,9 @@ import clsx from 'clsx';
 import {
   ArrowLeft,
   BellRing,
+  Calculator,
   CalendarRange,
+  HandCoins,
   CheckCircle2,
   Info,
   Pencil,
@@ -18,10 +20,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { EmptyState, Progress, Row, StatusBadge } from '../components/ui/common';
 import { formatDate, relativeDays, todayISO } from '../lib/dates';
 import { formatINR } from '../lib/format';
-import { computeLoan, describeRate, loanDescription } from '../lib/loans';
+import { computeLoan, describeRate, loanDescription, type InterestSegment } from '../lib/loans';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
 import { useSave } from '../lib/useSave';
+import type { Loan } from '../types';
 
 const FREQ_LABEL = { 'one-time': 'One-time', monthly: 'Monthly', quarterly: 'Quarterly', 'half-yearly': 'Half-yearly', yearly: 'Yearly' };
 
@@ -48,8 +51,11 @@ export default function LoanDetail() {
 
   const closed = !!loan.closedAt;
   const hasPrincipalRepay = s.principalRepaid > 0;
+  const hasTopUps = (loan.topUps ?? []).length > 0;
   const rateExplain =
-    loan.interestType === 'fixed'
+    hasTopUps && loan.interestType !== 'fixed'
+      ? 'Interest on each amount from the date it was given. See "How interest is calculated" below.'
+      : loan.interestType === 'fixed'
       ? `Fixed interest of ${formatINR(loan.interestRate)} for the loan`
       : loan.interestMethod === 'simple' && !hasPrincipalRepay
         ? `${formatINR(loan.principal)} × ${loan.interestRate}% × ${loan.interestType === 'monthly' ? `${s.elapsedMonths} months` : `${s.elapsedMonths} ÷ 12 years`}`
@@ -135,6 +141,11 @@ export default function LoanDetail() {
                 <Plus size={16} /> Add Repayment
               </button>
             )}
+            {!closed && (
+              <button className="btn bg-white text-violet-700 hover:bg-white/90" onClick={() => open({ kind: 'topup', loanId: loan.id })}>
+                <HandCoins size={16} /> Give More Money
+              </button>
+            )}
             <button className="btn bg-white/15 text-white backdrop-blur hover:bg-white/25" onClick={() => open({ kind: 'loan', editId: loan.id })}>
               <Pencil size={16} /> Edit Loan
             </button>
@@ -201,7 +212,7 @@ export default function LoanDetail() {
           <h2 className="mb-2 text-base font-bold">Loan details</h2>
           <div className="grid gap-x-8 sm:grid-cols-2">
             <div className="divide-y divide-slate-100 dark:divide-white/5">
-              <Row label="Principal" value={formatINR(s.principal, { paise: true })} />
+              <Row label={hasTopUps ? `Amount lent (${s.topUps.length + 1} amounts)` : 'Amount lent'} value={formatINR(s.totalLent, { paise: true })} />
               <Row label="Interest rate" value={describeRate(loan)} />
               <Row label="Start date" value={formatDate(loan.startDate)} />
               <Row label="Due date" value={`${formatDate(loan.dueDate)}`} />
@@ -226,6 +237,8 @@ export default function LoanDetail() {
           {loanDescription(loan) && <p className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-white/5 dark:text-slate-300">{loanDescription(loan)}</p>}
         </section>
       </div>
+
+      <AmountsGiven loan={loan} segments={s.segments} closed={closed} />
 
       {/* Interest received */}
       {(
@@ -330,14 +343,29 @@ export default function LoanDetail() {
               <tr className="text-slate-500 dark:text-slate-400">
                 <td className="px-4 py-3 sm:px-5">
                   <div className="font-medium text-slate-700 dark:text-slate-200">{formatDate(loan.startDate)}</div>
-                  <div className="text-xs">Loan given</div>
+                  <div className="text-xs">{hasTopUps ? 'First amount given' : 'Loan given'}</div>
                 </td>
                 <td className="px-3 py-3 text-right font-semibold text-violet-600 dark:text-violet-300">{formatINR(loan.principal)}</td>
                 <td className="px-3 py-3 text-right">—</td>
                 <td className="px-3 py-3 text-right">—</td>
                 <td className="px-4 py-3 text-right font-semibold text-slate-700 dark:text-slate-200 sm:px-5">{formatINR(loan.principal)}</td>
               </tr>
-              {s.timeline.map((r) => (
+              {s.timeline.map((r) =>
+                r.kind === 'topup' ? (
+                  <tr key={r.id} className="cursor-pointer bg-violet-50/40 hover:bg-violet-50 dark:bg-violet-500/5 dark:hover:bg-white/5" onClick={() => open({ kind: 'topup', loanId: loan.id, editId: r.id })}>
+                    <td className="px-4 py-3 sm:px-5">
+                      <div className="font-medium">{formatDate(r.date)}</div>
+                      <div className="text-xs text-violet-600 dark:text-violet-300">
+                        More money given
+                        {r.notes && ` · ${r.notes}`}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-right font-semibold text-violet-600 dark:text-violet-300">+{formatINR(r.amount, { paise: true })}</td>
+                    <td className="px-3 py-3 text-right">—</td>
+                    <td className="px-3 py-3 text-right">—</td>
+                    <td className="px-4 py-3 text-right font-semibold sm:px-5">{formatINR(r.balance, { paise: true })}</td>
+                  </tr>
+                ) : (
                 <tr key={r.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => open({ kind: 'repayment', loanId: loan.id, editId: r.id })}>
                   <td className="px-4 py-3 sm:px-5">
                     <div className="font-medium">{formatDate(r.date)}</div>
@@ -351,7 +379,8 @@ export default function LoanDetail() {
                   <td className="px-3 py-3 text-right text-sky-600 dark:text-sky-300">{formatINR(r.interest, { paise: true })}</td>
                   <td className="px-4 py-3 text-right font-semibold sm:px-5">{formatINR(r.balance, { paise: true })}</td>
                 </tr>
-              ))}
+                ),
+              )}
               {!closed && (
                 <tr className="bg-violet-50/50 dark:bg-violet-500/5">
                   <td className="px-4 py-3 sm:px-5">
@@ -379,5 +408,106 @@ export default function LoanDetail() {
         </button>
       </div>
     </div>
+  );
+}
+
+/** Merge back-to-back stretches charged on the same amount (an interest receipt doesn't change the amount). */
+function mergeSegments(segs: InterestSegment[]): InterestSegment[] {
+  const out: InterestSegment[] = [];
+  for (const g of segs) {
+    const last = out[out.length - 1];
+    if (last && last.base === g.base && last.to === g.from) {
+      last.to = g.to;
+      last.months = Math.round((last.months + g.months) * 100) / 100;
+      last.interest = Math.round((last.interest + g.interest) * 100) / 100;
+    } else out.push({ ...g });
+  }
+  return out;
+}
+
+/** Every amount given to this person (first + later ones) and the interest worked out for each stretch. */
+function AmountsGiven({ loan, segments, closed }: { loan: Loan; segments: InterestSegment[]; closed: boolean }) {
+  const open = useUI((s) => s.open);
+  const tops = [...(loan.topUps ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  const total = loan.principal + tops.reduce((a, t) => a + t.amount, 0);
+  const rows = mergeSegments(segments);
+  const perMonth = loan.interestType === 'monthly' ? `${loan.interestRate}% a month` : `${loan.interestRate}% a year`;
+  return (
+    <section className="card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4 sm:px-5">
+        <div>
+          <h2 className="text-base font-bold">Amounts given</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Gave money again on another date? Add it here. Interest on it starts from its own date.</p>
+        </div>
+        {!closed && (
+          <button className="btn bg-violet-600 py-2 text-white hover:bg-violet-700" onClick={() => open({ kind: 'topup', loanId: loan.id })}>
+            <Plus size={15} /> Give more money
+          </button>
+        )}
+      </div>
+      <ul className="mt-3 divide-y divide-slate-100 border-y border-slate-100 dark:divide-white/5 dark:border-white/5">
+        <li className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm sm:px-5">
+          <span>
+            <span className="font-medium">{formatDate(loan.startDate)}</span>
+            <span className="block text-xs text-slate-500 dark:text-slate-400">First amount</span>
+          </span>
+          <span className="num font-semibold text-violet-600 dark:text-violet-300">{formatINR(loan.principal)}</span>
+        </li>
+        {tops.map((t) => (
+          <li key={t.id}>
+            <button className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-white/5 sm:px-5" onClick={() => open({ kind: 'topup', loanId: loan.id, editId: t.id })}>
+              <span className="min-w-0">
+                <span className="font-medium">{formatDate(t.date)}</span>
+                <span className="block break-words text-xs text-slate-500 dark:text-slate-400">More money given{t.notes ? ` · ${t.notes}` : ''}</span>
+              </span>
+              <span className="num shrink-0 font-semibold text-violet-600 dark:text-violet-300">+{formatINR(t.amount)}</span>
+            </button>
+          </li>
+        ))}
+        <li className="flex items-center justify-between gap-3 bg-slate-50/70 px-4 py-2.5 text-sm font-bold dark:bg-white/[0.02] sm:px-5">
+          <span>Total lent</span>
+          <span className="num">{formatINR(total)}</span>
+        </li>
+      </ul>
+
+      {loan.interestType !== 'fixed' && loan.interestRate > 0 && rows.length > 0 && (
+        <div className="px-4 py-4 sm:px-5">
+          <div className="flex items-center gap-2 text-sm font-bold">
+            <Calculator size={16} className="text-sky-600 dark:text-sky-300" /> How interest is calculated
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {perMonth}
+            {loan.interestMethod === 'compound' ? ', compounded' : ''} on the amount with them in each period
+          </p>
+          <div className="mt-2 overflow-x-auto">
+            <table className="num w-full min-w-[420px] text-sm">
+              <thead>
+                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  <th className="py-2 pr-3">Period</th>
+                  <th className="px-2 py-2 text-right">On amount</th>
+                  <th className="px-2 py-2 text-right">Months</th>
+                  <th className="py-2 pl-2 text-right">Interest</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                {rows.map((g) => (
+                  <tr key={g.from}>
+                    <td className="py-2 pr-3 text-xs">
+                      {formatDate(g.from)} → {formatDate(g.to)}
+                    </td>
+                    <td className="px-2 py-2 text-right font-medium">{formatINR(g.base)}</td>
+                    <td className="px-2 py-2 text-right text-slate-500 dark:text-slate-400">{g.months}</td>
+                    <td className="py-2 pl-2 text-right font-semibold text-sky-600 dark:text-sky-300">{formatINR(g.interest, { paise: true })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            Each period starts when money was given, repaid or interest was received. Interest received is taken off in the Interest received section below.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }

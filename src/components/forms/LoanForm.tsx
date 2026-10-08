@@ -8,7 +8,7 @@ import { Field, Row, Segmented } from '../ui/common';
 import { addMonths, formatDate, monthsBetween, todayISO } from '../../lib/dates';
 import { round2 } from '../../lib/finance';
 import { formatINR } from '../../lib/format';
-import { computeLoan, expectedInterest, installmentCount } from '../../lib/loans';
+import { computeLoan, expectedInterest, installmentCount, totalLent } from '../../lib/loans';
 import { useStore, type LoanInput } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
 import { useSave } from '../../lib/useSave';
@@ -25,6 +25,8 @@ const FREQS: { value: PaymentFrequency; label: string }[] = [
 export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => void }) {
   const existing = useStore((s) => (editId ? s.loans.find((l) => l.id === editId) : undefined));
   const addLoan = useStore((s) => s.addLoan);
+  const addTopUp = useStore((s) => s.addTopUp);
+  const allLoans = useStore((s) => s.loans);
   const updateLoan = useStore((s) => s.updateLoan);
   const deleteLoan = useStore((s) => s.deleteLoan);
   const restoreLoan = useStore((s) => s.restoreLoan);
@@ -139,6 +141,23 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
     }
   };
 
+  // Same person already has an open record → offer to add this amount to it (interest from its own date).
+  const sameName = f.borrowerName.trim().toLowerCase();
+  const match = !existing && sameName.length >= 2 ? allLoans.find((l) => !l.deletedAt && !l.closedAt && l.borrowerName.trim().toLowerCase() === sameName) : undefined;
+  const addToExisting = async () => {
+    if (!match) return;
+    if (!(draft.principal > 0)) return setErrors((e) => ({ ...e, principal: 'Enter the amount lent' }));
+    if (f.startDate < match.startDate) return setErrors((e) => ({ ...e, startDate: `Must be on/after ${match.borrowerName}'s first date` }));
+    const ok = await run(
+      () => addTopUp(match.id, { date: f.startDate, amount: draft.principal, notes: f.notes.trim() }),
+      `Added ${formatINR(draft.principal)} to ${match.borrowerName}'s record. Interest on it counts from ${formatDate(f.startDate)}.`,
+    );
+    if (ok) {
+      onClose();
+      navigate(`/loans/${match.id}`);
+    }
+  };
+
   const del = async () => {
     if (!existing) return;
     const ok = await confirm({
@@ -188,6 +207,23 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
       >
         {existing && !existing.closedAt && <InterestReceivedBox loan={existing} />}
 
+        {match && (
+          <div className="rounded-2xl border-2 border-violet-300 bg-violet-50 p-4 text-sm dark:border-violet-500/40 dark:bg-violet-500/10">
+            <div className="font-semibold">
+              {match.borrowerName} already has an interest record ({formatINR(totalLent(match))} since {formatDate(match.startDate)}).
+            </div>
+            <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              Add this amount to the same record: interest on it starts from the date you give it, and one interest payment covers both amounts.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" className="btn bg-violet-600 py-2 text-white hover:bg-violet-700" onClick={addToExisting} disabled={saving}>
+                Add to {match.borrowerName}'s record
+              </button>
+              <span className="self-center text-xs text-slate-500 dark:text-slate-400">or fill the form below for a separate record</span>
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Borrower's name" hint={errors.borrowerName && <span className="text-rose-600">{errors.borrowerName}</span>}>
             <input className="input" autoFocus={!existing} placeholder="e.g. Rahul" value={f.borrowerName} onChange={(e) => set('borrowerName', e.target.value)} />
@@ -195,7 +231,7 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
           <Field label="Phone number" hint={errors.phone && <span className="text-rose-600">{errors.phone}</span>}>
             <input className="input" type="tel" inputMode="tel" placeholder="98765 43210" value={f.phone} onChange={(e) => set('phone', e.target.value)} />
           </Field>
-          <Field label="Amount lent (₹)" hint={errors.principal && <span className="text-rose-600">{errors.principal}</span>}>
+          <Field label={existing?.topUps?.length ? "First amount lent (₹) · later amounts are on the record page" : "Amount lent (₹)"} hint={errors.principal && <span className="text-rose-600">{errors.principal}</span>}>
             <input className="input num text-base font-semibold" type="number" inputMode="decimal" min="0" step="0.01" placeholder="50000" value={f.principal} onChange={(e) => set('principal', e.target.value)} />
           </Field>
           <Field label="Date lent" hint={errors.startDate && <span className="text-rose-600">{errors.startDate}</span>}>

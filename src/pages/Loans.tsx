@@ -246,6 +246,7 @@ export default function Loans() {
                           <td className="px-3 py-3 text-right">
                             <div className="font-semibold">{formatINR(s.principal)}</div>
                             <div className="whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">{describeRate(loan)}</div>
+                            {s.topUps.length > 0 && <div className="whitespace-nowrap text-xs text-violet-600 dark:text-violet-300">{s.topUps.length + 1} amounts</div>}
                           </td>
                           <td className="px-3 py-3 text-xs">
                             {s.lastInterestPayment ? (

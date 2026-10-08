@@ -48,6 +48,15 @@ export interface Repayment {
   settlesInterest?: boolean;
 }
 
+/** More money given to the same person later, on its own date (interest on it starts from that date). */
+export interface TopUp {
+  id: string;
+  date: string;
+  amount: number;
+  notes: string;
+  createdAt: string;
+}
+
 export interface Loan {
   id: string;
   borrowerName: string;
@@ -68,6 +77,8 @@ export interface Loan {
   /** Set when the loan is marked as paid / closed. */
   closedAt?: string;
   repayments: Repayment[];
+  /** Further amounts lent to the same person after the start date. */
+  topUps?: TopUp[];
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;

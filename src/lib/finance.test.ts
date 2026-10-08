@@ -231,6 +231,30 @@ describe('loan engine', () => {
     expect(loanDescription(loan({ notes: 'Sati mav interest recieved dec 18 2025 · Due date not in file: set to 12 months after lending.' }))).toBe('Sati mav interest recieved dec 18 2025');
   });
 
+  it('more money given later: each amount earns interest from its own date', () => {
+    // ₹50,000 on 01 Jan + ₹30,000 on 01 Mar, 2%/month simple.
+    const top = { id: 't1', date: '2026-03-01', amount: 30000, notes: 'second amount', createdAt: now };
+    const l = loan({ principal: 50000, startDate: '2026-01-01', dueDate: '2026-07-01', interestRate: 2, topUps: [top] });
+    const s = computeLoan(l, '2026-05-01');
+    // Jan–Mar: 50,000 × 2% × 2 = 2,000; Mar–May: 80,000 × 2% × 2 = 3,200
+    expect(s.interestAccrued).toBe(5200);
+    expect(s.totalLent).toBe(80000);
+    expect(s.remainingPrincipal).toBe(80000);
+    expect(s.segments.map((g) => [g.from, g.to, g.base, g.interest])).toEqual([
+      ['2026-01-01', '2026-03-01', 50000, 2000],
+      ['2026-03-01', '2026-05-01', 80000, 3200],
+    ]);
+    expect(s.timeline[0]).toMatchObject({ kind: 'topup', amount: 30000 });
+    // Before the second amount is given, only the first counts.
+    expect(computeLoan(l, '2026-02-01').totalLent).toBe(50000);
+    // Full term: 50,000 × 6 months + 30,000 × 4 months at 2%.
+    expect(expectedInterest(l)).toBe(8400);
+    expect(s.totalAmountDue).toBe(88400);
+    // One full-interest receipt covers both amounts; then interest restarts on 80,000.
+    const paid = { ...l, repayments: [rep('2026-04-01', 3600, 0, 3600, 'r')] };
+    expect(computeLoan(paid, '2026-05-01').remainingInterest).toBe(1600);
+  });
+
   it('tracks interest received on a record with no rate set (e.g. imported)', () => {
     const l = loan({ interestRate: 0, repayments: [rep('2026-11-10', 1500, 0, 1500, 'a')] });
     const s = computeLoan(l, '2026-11-20');

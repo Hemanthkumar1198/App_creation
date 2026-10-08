@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import type { ActivityEntry, CalcNote, Loan, NoteEntry, Plan, PlanPayment, Repayment, Settings, Transaction } from '../types';
+import type { ActivityEntry, CalcNote, Loan, NoteEntry, Plan, PlanPayment, Repayment, Settings, TopUp, Transaction } from '../types';
 import { buildSampleData } from '../data/sample';
 import { round2 } from '../lib/finance';
 import { formatINR, uid } from '../lib/format';
-import { suggestRepaymentSplit } from '../lib/loans';
+import { suggestRepaymentSplit, totalLent } from '../lib/loans';
 import { todayISO } from '../lib/dates';
 import { defaultSettings, type Backend, type CommitResult, type DataSnapshot, type Op } from './backend';
 
@@ -13,6 +13,7 @@ export const THEME_KEY = 'paisa-ledger:theme';
 export type TxInput = Omit<Transaction, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
 export type LoanInput = Omit<Loan, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'repayments' | 'closedAt'>;
 export type RepaymentInput = Omit<Repayment, 'id' | 'createdAt'>;
+export type TopUpInput = Omit<TopUp, 'id' | 'createdAt'>;
 export type NoteEntryInput = Omit<NoteEntry, 'id' | 'createdAt'>;
 export type PlanInput = Omit<Plan, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'payments'>;
 export type PlanPaymentInput = Omit<PlanPayment, 'id' | 'createdAt'>;
@@ -54,6 +55,10 @@ interface State extends DataSnapshot {
   addRepayment: (loanId: string, input: RepaymentInput) => Result;
   updateRepayment: (loanId: string, repaymentId: string, input: RepaymentInput) => Result;
   deleteRepayment: (loanId: string, repaymentId: string) => Result;
+  /** More money given to the same person on a later date (interest on it starts from that date). */
+  addTopUp: (loanId: string, input: TopUpInput) => Result;
+  updateTopUp: (loanId: string, topUpId: string, input: TopUpInput) => Result;
+  deleteTopUp: (loanId: string, topUpId: string) => Result;
 
   updateSettings: (s: Partial<Settings>) => Result;
   importRecords: (txs: Transaction[], loans: Loan[], label: string) => Result;
@@ -207,6 +212,21 @@ function cleanRepayment(input: RepaymentInput): RepaymentInput {
   return r;
 }
 
+function cleanTopUp(loan: Loan, input: TopUpInput): TopUpInput {
+  const t = { date: input.date, amount: round2(input.amount), notes: (input.notes ?? '').trim().slice(0, 500) };
+  assertAmount(t.amount, 'Amount given');
+  assertDate(t.date, 'Date given');
+  if (t.date < loan.startDate) throw new ValidationError(`Date cannot be before the first amount was given (${loan.startDate})`);
+  if (loan.closedAt) throw new ValidationError('This record is closed. Reopen it first, or add a new record.');
+  return t;
+}
+
+/** After changing top-ups, the principal already repaid must still fit inside the total lent. */
+function assertRepaidFits(l: Loan) {
+  const principalPaid = l.repayments.reduce((a, r) => a + r.principalPortion, 0);
+  if (principalPaid > totalLent(l) + 0.009) throw new ValidationError(`Total lent cannot be less than the ${formatINR(principalPaid)} already repaid`);
+}
+
 /** A repayment can never exceed what is outstanding on its date. */
 function assertWithinOutstanding(loan: Loan, r: RepaymentInput, excludeId?: string) {
   if (r.date < loan.startDate) throw new ValidationError('Repayment date cannot be before the loan start date');
@@ -290,8 +310,8 @@ export const useStore = create<State>()((_set, get) => {
       const l: Loan = { ...findLoan(id), ...input };
       if (input.principal !== undefined) l.principal = round2(input.principal);
       validateLoan(l);
-      const principalPaid = l.repayments.reduce((a, r) => a + r.principalPortion, 0);
-      if (principalPaid > l.principal + 0.009) throw new ValidationError(`Principal cannot be less than the ${formatINR(principalPaid)} already repaid`);
+      assertRepaidFits(l);
+      if ((l.topUps ?? []).some((t) => t.date < l.startDate)) throw new ValidationError('The first date cannot be after a later amount given. Change that amount first.');
       return commit([putLoan(l), activity({ action: 'updated', entity: 'loan', label: `Edited loan · ${l.borrowerName}` })]);
     },
     deleteLoan: async (id) => {
@@ -343,6 +363,32 @@ export const useStore = create<State>()((_set, get) => {
       return commit([
         putLoan({ ...l, repayments: l.repayments.filter((x) => x.id !== repaymentId) }),
         activity({ action: 'deleted', entity: 'repayment', label: `Deleted repayment from ${l.borrowerName}${r ? ` · ${formatINR(r.amount)} (${r.date})` : ''}` }),
+      ]);
+    },
+
+    addTopUp: async (loanId, input) => {
+      const l = findLoan(loanId);
+      const t = cleanTopUp(l, input);
+      return commit([
+        putLoan({ ...l, topUps: [...(l.topUps ?? []), { ...t, id: uid(), createdAt: nowISO() }] }),
+        activity({ action: 'updated', entity: 'loan', label: `Gave ${formatINR(t.amount)} more to ${l.borrowerName} on ${t.date}` }),
+      ]);
+    },
+    updateTopUp: async (loanId, topUpId, input) => {
+      const l = findLoan(loanId);
+      const t = cleanTopUp(l, input);
+      const next = { ...l, topUps: (l.topUps ?? []).map((x) => (x.id === topUpId ? { ...x, ...t } : x)) };
+      assertRepaidFits(next);
+      return commit([putLoan(next), activity({ action: 'updated', entity: 'loan', label: `Edited amount given to ${l.borrowerName} · ${formatINR(t.amount)}` })]);
+    },
+    deleteTopUp: async (loanId, topUpId) => {
+      const l = findLoan(loanId);
+      const t = (l.topUps ?? []).find((x) => x.id === topUpId);
+      const next = { ...l, topUps: (l.topUps ?? []).filter((x) => x.id !== topUpId) };
+      assertRepaidFits(next);
+      return commit([
+        putLoan(next),
+        activity({ action: 'deleted', entity: 'loan', label: `Removed amount given to ${l.borrowerName}${t ? ` · ${formatINR(t.amount)} (${t.date})` : ''}` }),
       ]);
     },
 

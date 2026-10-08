@@ -120,7 +120,7 @@ export function buildSections(allTxs: Transaction[], allLoans: Loan[], range: Ex
           l.borrowerName, l.phone, s.principal, formatDateNumeric(l.startDate), formatDateNumeric(l.dueDate), describeRate(l).replace('₹', 'Rs.'),
           s.interestAccrued, s.totalAmountDue, s.amountRepaid, s.totalOutstanding, STATUS_LABEL[s.status], l.notes,
         ]),
-      total: round2(loansInRange.reduce((a, l) => a + l.principal, 0)),
+      total: round2(summaries.filter(({ l }) => loansInRange.includes(l) || range.start === undefined).reduce((a, { s }) => a + s.principal, 0)),
     },
     {
       title: 'Loan Repayments',

@@ -2,7 +2,7 @@
  * Loan engine — derives every loan figure from the loan terms, the repayment
  * history and a reference date. Pure: no React, no storage.
  */
-import type { Loan, LoanStatus, PaymentFrequency, Repayment } from '../types';
+import type { Loan, LoanStatus, PaymentFrequency, Repayment, TopUp } from '../types';
 import { addMonths, diffDays, minDate, monthsBetween, todayISO } from './dates';
 import {
   interestBetween,
@@ -19,6 +19,8 @@ import {
 
 export interface TimelineRow {
   id: string;
+  /** 'topup' = more money given; otherwise a repayment / interest receipt. */
+  kind: 'repayment' | 'topup';
   date: string;
   amount: number;
   principal: number;
@@ -43,6 +45,16 @@ export interface InterestPayment {
   periodFrom: string;
   paymentMethod: Repayment['paymentMethod'];
   notes: string;
+}
+
+/** One stretch of time with a constant amount lent, for "how interest is calculated". */
+export interface InterestSegment {
+  from: string;
+  to: string;
+  /** Amount interest was charged on in this stretch. */
+  base: number;
+  months: number;
+  interest: number;
 }
 
 export interface LoanSummary {
@@ -83,6 +95,11 @@ export interface LoanSummary {
   daysToDue: number;
   progress: number;
   timeline: TimelineRow[];
+  /** Interest broken into stretches of a constant amount (changes at each top-up / repayment / receipt). */
+  segments: InterestSegment[];
+  /** Original amount + every top-up up to the as-of date. */
+  totalLent: number;
+  topUps: TopUp[];
 }
 
 export const FREQUENCY_MONTHS: Record<PaymentFrequency, number> = {
@@ -106,10 +123,21 @@ export function sortRepayments(reps: Repayment[]): Repayment[] {
   return [...reps].sort((a, b) => (a.date === b.date ? a.createdAt.localeCompare(b.createdAt) : a.date.localeCompare(b.date)));
 }
 
-/** Interest for the agreed term, ignoring repayments. ₹50,000 @ 2%/m for 6m → ₹6,000. */
+export function sortTopUps(t: TopUp[] | undefined): TopUp[] {
+  return [...(t ?? [])].sort((a, b) => (a.date === b.date ? a.createdAt.localeCompare(b.createdAt) : a.date.localeCompare(b.date)));
+}
+
+/** Original amount + all top-ups (optionally only those given on/before `asOf`). */
+export function totalLent(loan: Loan, asOf?: string): number {
+  return round2(loan.principal + sumMoney((loan.topUps ?? []).filter((t) => !asOf || t.date <= asOf).map((t) => t.amount)));
+}
+
+/** Interest for the agreed term, ignoring repayments. ₹50,000 @ 2%/m for 6m → ₹6,000. Each top-up earns from its own date. */
 export function expectedInterest(loan: Loan): number {
   if (loan.interestType === 'fixed') return round2(loan.interestRate);
-  return interestBetween(loan.principal, loanTerms(loan), loan.startDate, loan.dueDate);
+  const terms = loanTerms(loan);
+  const extra = (loan.topUps ?? []).filter((t) => t.date < loan.dueDate).map((t) => interestBetween(t.amount, terms, t.date, loan.dueDate));
+  return round2(interestBetween(loan.principal, terms, loan.startDate, loan.dueDate) + sumMoney(extra));
 }
 
 export function installmentCount(loan: Loan): number {
@@ -162,23 +190,28 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
   const accrualEnd = minDate(endCandidate, asOf) < start ? start : minDate(endCandidate, asOf);
 
   const reps = sortRepayments(loan.repayments.filter((r) => r.date <= asOf));
+  const tops = sortTopUps(loan.topUps).filter((t) => t.date <= asOf);
   const elapsed = (d: string) => monthsBetween(start, d < start ? start : d);
 
+  let lent = loan.principal;
   let principalPaid = 0;
   let interestPaid = 0;
   let accrued = 0; // unrounded running total
   let cursor = start;
   const timeline: TimelineRow[] = [];
+  const segments: InterestSegment[] = [];
 
   const accrue = (to: string) => {
     if (loan.interestType === 'fixed') return;
     const target = to > accrualEnd ? accrualEnd : to;
     if (target <= cursor) return;
-    const pOut = Math.max(0, loan.principal - principalPaid);
+    const pOut = Math.max(0, lent - principalPaid);
     const base = loan.interestMethod === 'compound' ? pOut + Math.max(0, accrued - interestPaid) : pOut;
     const months = elapsed(target) - elapsed(cursor);
     // Compound: the base already carries unpaid interest, so chaining segments compounds exactly.
-    accrued += interestForMonthsRaw(base, terms, months);
+    const interest = interestForMonthsRaw(base, terms, months);
+    accrued += interest;
+    segments.push({ from: cursor, to: target, base: round2(base), months: round2(months), interest: round2(interest) });
     cursor = target;
   };
 
@@ -186,17 +219,41 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
     accrued = loan.interestRate;
   }
 
-  for (const r of reps) {
-    accrue(r.date);
+  // Walk through top-ups and repayments in date order (money given first on the same day).
+  type Ev = { at: string; top?: TopUp; rep?: Repayment };
+  const events: Ev[] = [...tops.map((t): Ev => ({ at: t.date, top: t })), ...reps.map((r): Ev => ({ at: r.date, rep: r }))].sort((a, b) =>
+    a.at === b.at ? (a.top ? 0 : 1) - (b.top ? 0 : 1) : a.at.localeCompare(b.at),
+  );
+  for (const ev of events) {
+    accrue(ev.at);
+    if (ev.top) {
+      const t = ev.top;
+      lent += t.amount;
+      timeline.push({
+        id: t.id,
+        kind: 'topup',
+        date: t.date,
+        amount: round2(t.amount),
+        principal: round2(t.amount),
+        interest: 0,
+        interestAccruedToDate: round2(accrued),
+        balance: remainingBalance(outstandingPrincipal(lent, principalPaid), outstandingInterest(accrued, interestPaid)),
+        paymentMethod: 'Cash',
+        notes: t.notes,
+      });
+      continue;
+    }
+    const r = ev.rep!;
     principalPaid += r.principalPortion;
     interestPaid += r.interestPortion;
     // "Full interest till this date received": nothing more (or less) is owed up to this date,
     // so interest starts fresh from here on the remaining principal.
     if (loan.interestType !== 'fixed' && settlesInterest(r)) accrued = interestPaid;
-    const pOut = outstandingPrincipal(loan.principal, principalPaid);
+    const pOut = outstandingPrincipal(lent, principalPaid);
     const iOut = outstandingInterest(accrued, interestPaid);
     timeline.push({
       id: r.id,
+      kind: 'repayment',
       date: r.date,
       amount: round2(r.amount),
       principal: round2(r.principalPortion),
@@ -213,7 +270,7 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
   const principalRepaid = sumMoney(reps.map((r) => r.principalPortion));
   const interestRepaid = sumMoney(reps.map((r) => r.interestPortion));
   const amountRepaid = sumMoney(reps.map((r) => r.amount));
-  let remainingPrincipal = outstandingPrincipal(loan.principal, principalRepaid);
+  let remainingPrincipal = outstandingPrincipal(lent, principalRepaid);
   let remainingInterest = outstandingInterest(interestAccrued, interestRepaid);
   let totalOutstanding = remainingBalance(remainingPrincipal, remainingInterest);
 
@@ -227,7 +284,7 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
   }
 
   const expInterest = expectedInterest(loan);
-  const totalAmountDue = totalRepayment(loan.principal, expInterest);
+  const totalAmountDue = totalRepayment(totalLent(loan), expInterest);
   const fullyPaid = closed || (totalOutstanding <= 0.009 && amountRepaid > 0);
 
   let status: LoanStatus;
@@ -286,7 +343,10 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
   const interestPerPeriod = loan.interestType === 'fixed' ? 0 : round2(interestForMonthsRaw(remainingPrincipal, terms, periodMonths));
 
   return {
-    principal: round2(loan.principal),
+    principal: round2(lent),
+    totalLent: round2(lent),
+    topUps: tops,
+    segments,
     interestPayments,
     lastInterestPayment,
     nextInterestDueDate,

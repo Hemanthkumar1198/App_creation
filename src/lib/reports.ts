@@ -82,7 +82,10 @@ export function loanActivity(loans: Loan[], start: string, end: string) {
   const ls = live(loans);
   const reps = ls.flatMap((l) => l.repayments.filter((r) => inRange(r.date, start, end)));
   return {
-    lent: sumMoney(ls.filter((l) => inRange(l.startDate, start, end)).map((l) => l.principal)),
+    lent: sumMoney([
+      ...ls.filter((l) => inRange(l.startDate, start, end)).map((l) => l.principal),
+      ...ls.flatMap((l) => (l.topUps ?? []).filter((t) => inRange(t.date, start, end)).map((t) => t.amount)),
+    ]),
     repaid: sumMoney(reps.map((r) => r.amount)),
     principalRepaid: sumMoney(reps.map((r) => r.principalPortion)),
     interestEarned: sumMoney(reps.map((r) => r.interestPortion)),

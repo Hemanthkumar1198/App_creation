@@ -6,6 +6,7 @@ import { Layout, useIsDark, useReminders } from './components/Layout';
 import { CloseLoanForm, ReminderSheet } from './components/forms/LoanActions';
 import { LoanForm } from './components/forms/LoanForm';
 import { InterestForm } from './components/forms/InterestForm';
+import { TopUpForm } from './components/forms/TopUpForm';
 import { NoteEntryForm, NoteForm, PlanForm, PlanPaymentForm } from './components/forms/NotesPlansForms';
 import { RepaymentForm } from './components/forms/RepaymentForm';
 import { TransactionForm } from './components/forms/TransactionForm';
@@ -46,6 +47,8 @@ function SheetHost() {
         return <RepaymentForm key={sheet.editId ?? 'new'} loanId={sheet.loanId} editId={sheet.editId} onClose={close} />;
       case 'interest':
         return <InterestForm loanId={sheet.loanId} onClose={close} />;
+      case 'topup':
+        return <TopUpForm key={sheet.editId ?? 'new'} loanId={sheet.loanId} editId={sheet.editId} onClose={close} />;
       case 'note':
         return <NoteForm key={sheet.editId ?? 'new'} editId={sheet.editId} onClose={close} />;
       case 'note-entry':
