@@ -36,7 +36,6 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
   const save = async () => {
     if (!(value > 0)) return setError('Enter the interest amount received');
     if (date < loan.startDate) return setError(`Date cannot be before the loan start (${formatDate(loan.startDate)})`);
-    if (value > due.maxInterest + 0.009) return setError(`That's more than the interest due (${formatINR(due.interestDue, { paise: true })}) plus 12 months in advance`);
     const ok = await run(
       () => addRepayment(loan.id, { amount: value, date, paymentMethod: method, principalPortion: 0, interestPortion: value, notes: notes.trim() || 'Interest received' }),
       `Interest of ${formatINR(value)} received from ${loan.borrowerName}`,
@@ -64,8 +63,14 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
       <div className="space-y-5">
         <div className="rounded-2xl bg-sky-50 px-4 py-1 dark:bg-sky-500/10">
           <Row label="Last interest received" value={summary.lastInterestPayment ? `${formatINR(summary.lastInterestPayment.amount)} on ${formatDate(summary.lastInterestPayment.date)}` : 'Never'} />
-          <Row label={`Interest due as of ${formatDate(date)}`} value={formatINR(due.interestDue, { paise: true })} tone="interest" strong />
-          <Row label={`Interest for ${periodLabel}`} value={formatINR(summary.interestPerPeriod, { paise: true })} />
+          {loan.interestRate > 0 ? (
+            <>
+              <Row label={`Interest due as of ${formatDate(date)}`} value={formatINR(due.interestDue, { paise: true })} tone="interest" strong />
+              <Row label={`Interest for ${periodLabel}`} value={formatINR(summary.interestPerPeriod, { paise: true })} />
+            </>
+          ) : (
+            <p className="py-2 text-xs text-slate-500 dark:text-slate-400">No interest rate set, so just enter what was received. Set the rate with Edit to see what's due.</p>
+          )}
         </div>
 
         <div>
@@ -118,7 +123,7 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
           <input className="input" placeholder="e.g. Interest for October" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          The next interest is counted from {formatDate(date)}. This is recorded under Loans, not as daily income.
+          The next interest is counted from {formatDate(date)}. It is kept in Interest Calculation, not in daily Cash In.
         </p>
         {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
       </div>

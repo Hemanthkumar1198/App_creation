@@ -251,7 +251,7 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
   }
   const lastInterestPayment = interestPayments.length ? interestPayments[interestPayments.length - 1] : null;
   const nextInterestDueDate =
-    fullyPaid || loan.interestType === 'fixed' || loan.interestRate <= 0 ? null : addMonths(lastInterestPayment?.date ?? start, periodMonths);
+    fullyPaid || loan.interestType === 'fixed' ? null : addMonths(lastInterestPayment?.date ?? start, periodMonths);
   const interestPerPeriod = loan.interestType === 'fixed' ? 0 : round2(interestForMonthsRaw(remainingPrincipal, terms, periodMonths));
 
   return {

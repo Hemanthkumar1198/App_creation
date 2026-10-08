@@ -204,6 +204,16 @@ describe('loan engine', () => {
     expect(computeLoan(loan(), '2026-10-15').nextInterestDueDate).toBe('2026-11-01');
   });
 
+  it('tracks interest received on a record with no rate set (e.g. imported)', () => {
+    const l = loan({ interestRate: 0, repayments: [rep('2026-11-10', 1500, 0, 1500, 'a')] });
+    const s = computeLoan(l, '2026-11-20');
+    expect(s.lastInterestPayment?.date).toBe('2026-11-10');
+    expect(s.nextInterestDueDate).toBe('2026-12-10');
+    expect(s.interestRepaid).toBe(1500);
+    expect(s.remainingPrincipal).toBe(50000);
+    expect(s.status).not.toBe('fully-paid');
+  });
+
   it('allows interest in advance (up to 12 months) but not principal beyond what is owed', () => {
     const sp = suggestRepaymentSplit(loan(), 0, '2026-11-01');
     expect(sp.interestDue).toBe(1000);

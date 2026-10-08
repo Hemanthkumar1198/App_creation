@@ -233,7 +233,7 @@ export default function Loans() {
                   <tbody className="divide-y divide-slate-50 dark:divide-white/[0.03]">
                     {shown.map(({ loan, s }) => {
                       const closed = s.status === 'fully-paid';
-                      const canInterest = !closed && loan.interestType !== 'fixed' && loan.interestRate > 0;
+                      const canInterest = !closed;
                       return (
                         <tr key={loan.id} className="hover:bg-slate-50 dark:hover:bg-white/5">
                           <td className="px-4 py-3">

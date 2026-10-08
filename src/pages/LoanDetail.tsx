@@ -125,7 +125,7 @@ export default function LoanDetail() {
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-            {!closed && loan.interestType !== 'fixed' && loan.interestRate > 0 && (
+            {!closed && (
               <button className="btn bg-white text-sky-700 hover:bg-white/90" onClick={() => open({ kind: 'interest', loanId: loan.id })}>
                 <Percent size={16} /> Receive Interest
               </button>
@@ -228,7 +228,7 @@ export default function LoanDetail() {
       </div>
 
       {/* Interest received */}
-      {loan.interestType !== 'fixed' && loan.interestRate > 0 && (
+      {(
         <section className="card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4 sm:px-5">
             <div>
@@ -253,12 +253,19 @@ export default function LoanDetail() {
                 {s.nextInterestDueDate ? formatDate(s.nextInterestDueDate) : '—'}
               </div>
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                {s.nextInterestDueDate ? `${relativeDays(s.nextInterestDueDate, today)} · ~${formatINR(s.interestPerPeriod)} per ${s.interestPeriodMonths === 1 ? 'month' : `${s.interestPeriodMonths} months`}` : ''}
+                {s.nextInterestDueDate ? relativeDays(s.nextInterestDueDate, today) : ''}
+                {s.nextInterestDueDate && s.interestPerPeriod > 0 ? ` · ~${formatINR(s.interestPerPeriod)} per ${s.interestPeriodMonths === 1 ? 'month' : `${s.interestPeriodMonths} months`}` : ''}
               </div>
             </div>
             <div className="rounded-2xl bg-sky-50 p-3 dark:bg-sky-500/10">
               <div className="text-xs text-slate-500 dark:text-slate-400">Interest due now</div>
-              <div className="num mt-0.5 font-bold text-sky-700 dark:text-sky-300">{formatINR(s.remainingInterest, { paise: true })}</div>
+              {loan.interestRate > 0 ? (
+                <div className="num mt-0.5 font-bold text-sky-700 dark:text-sky-300">{formatINR(s.remainingInterest, { paise: true })}</div>
+              ) : (
+                <button className="mt-0.5 text-left text-sm font-bold text-sky-700 underline dark:text-sky-300" onClick={() => open({ kind: 'loan', editId: loan.id })}>
+                  Set interest rate
+                </button>
+              )}
               <div className="text-xs text-slate-500 dark:text-slate-400">Total received {formatINR(s.interestRepaid)}</div>
             </div>
           </div>

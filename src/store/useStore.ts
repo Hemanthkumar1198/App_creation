@@ -211,8 +211,9 @@ function assertWithinOutstanding(loan: Loan, r: RepaymentInput, excludeId?: stri
   const due = suggestRepaymentSplit(loan, r.amount, r.date, excludeId);
   if (r.principalPortion > due.principalDue + 0.009)
     throw new ValidationError(`Principal portion exceeds the remaining principal of ${formatINR(due.principalDue, { paise: true })}`);
-  // Interest may be paid in advance (up to 12 months), but never more than that.
-  if (r.interestPortion > due.maxInterest + 0.009)
+  // An interest-only receipt is recorded as received (the rate may be unknown or informal).
+  // When principal is also paid, interest may be in advance (up to 12 months), but never more.
+  if (r.principalPortion > 0 && r.interestPortion > due.maxInterest + 0.009)
     throw new ValidationError(
       r.principalPortion > 0
         ? `Repayment exceeds the outstanding amount of ${formatINR(due.outstanding, { paise: true })} on that date`
