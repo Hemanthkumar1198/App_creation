@@ -212,6 +212,30 @@ export default function Settings() {
   const [name, setName] = useState(settings.userName);
 
   const { notes, plans } = st;
+  // Imports save all their rows with the same creation time, so they can be found and undone as a group.
+  const imports = useMemo(() => {
+    const groups = new Map<string, { key: string; kind: 'tx' | 'loan'; at: string; ids: string[]; total: number; sample: string }>();
+    for (const t of transactions) {
+      if (t.deletedAt) continue;
+      const k = `tx|${t.createdAt}`;
+      const g = groups.get(k) ?? { key: k, kind: 'tx' as const, at: t.createdAt, ids: [], total: 0, sample: t.description || t.category };
+      g.ids.push(t.id);
+      g.total += t.amount;
+      groups.set(k, g);
+    }
+    for (const l of loans) {
+      if (l.deletedAt) continue;
+      const k = `loan|${l.createdAt}`;
+      const g = groups.get(k) ?? { key: k, kind: 'loan' as const, at: l.createdAt, ids: [], total: 0, sample: l.borrowerName };
+      g.ids.push(l.id);
+      g.total += l.principal;
+      groups.set(k, g);
+    }
+    return [...groups.values()]
+      .filter((g) => g.ids.length >= 2)
+      .map((g) => ({ ...g, count: g.ids.length }))
+      .sort((a, b) => b.at.localeCompare(a.at));
+  }, [transactions, loans]);
   const trash = useMemo(
     () =>
       [
@@ -415,6 +439,44 @@ export default function Settings() {
               <input type="checkbox" className="h-5 w-5 accent-brand-600" checked={settings.browserNotifications} onChange={(e) => enableNotifications(e.target.checked)} />
             </label>
           </div>
+        </Section>
+
+        <Section icon={FileUp} title="Recent imports" desc="Imported the wrong file, or into the wrong section? Move that whole import to Trash in one tap (restorable).">
+          {imports.length === 0 ? (
+            <p className="rounded-2xl bg-slate-50 p-4 text-center text-sm text-slate-500 dark:bg-white/5">No imports yet.</p>
+          ) : (
+            <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto dark:divide-white/5">
+              {imports.map((b) => (
+                <div key={b.key} className="flex items-center gap-2 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">
+                      {b.count} {b.kind === 'tx' ? (b.count === 1 ? 'transaction' : 'transactions') : b.count === 1 ? 'interest record' : 'interest records'} · {formatINR(b.total)}
+                    </div>
+                    <div className="truncate text-xs text-slate-500">
+                      {formatDate(b.at.slice(0, 10))} {new Date(b.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} · {b.sample}
+                    </div>
+                  </div>
+                  <button
+                    className="btn-ghost px-2.5 py-1.5 text-xs text-rose-600"
+                    disabled={saving}
+                    onClick={async () => {
+                      if (
+                        await confirm({
+                          title: 'Undo this import?',
+                          message: `${b.count} ${b.kind === 'tx' ? 'transactions' : 'interest records'} (${formatINR(b.total)}) will be moved to Trash. You can restore them any time.`,
+                          confirmLabel: 'Move to Trash',
+                          danger: true,
+                        })
+                      )
+                        run(() => st.trashMany(b.kind === 'tx' ? b.ids : [], b.kind === 'loan' ? b.ids : [], `Undid import of ${b.count} records`), 'Import moved to Trash');
+                    }}
+                  >
+                    <RotateCcw size={14} /> Undo import
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </Section>
 
         <Section icon={Trash2} title={`Trash (${trash.length})`} desc="Deleted transactions and loans are kept here forever and can be restored at any time.">

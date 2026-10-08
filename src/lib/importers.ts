@@ -206,21 +206,21 @@ export const LOAN_FIELDS: { key: LoanField; label: string }[] = [
 
 const SYNONYMS: Record<string, string[]> = {
   date: ['date', 'txn date', 'transaction date', 'value date', 'posting date', 'tran date', 'dt', 'entry date'],
-  description: ['description', 'narration', 'particulars', 'details', 'remarks', 'title', 'item', 'purpose', 'transaction details', 'desc'],
+  description: ['description', 'narration', 'particulars', 'details', 'remarks', 'remark', 'title', 'item', 'purpose', 'transaction details', 'desc'],
   amount: ['amount', 'amt', 'amount inr', 'amount rs', 'value', 'total', 'inr', 'rs', 'transaction amount'],
-  debit: ['debit', 'withdrawal', 'withdrawals', 'withdrawal amt', 'dr', 'debit amount', 'paid out', 'money out', 'out', 'spent', 'expense amount'],
-  credit: ['credit', 'deposit', 'deposits', 'deposit amt', 'cr', 'credit amount', 'paid in', 'money in', 'in', 'received'],
+  debit: ['debit', 'withdrawal', 'withdrawals', 'withdrawal amt', 'dr', 'debit amount', 'paid out', 'money out', 'out', 'spent', 'expense amount', 'cash out'],
+  credit: ['credit', 'deposit', 'deposits', 'deposit amt', 'cr', 'credit amount', 'paid in', 'money in', 'in', 'received', 'cash in'],
   type: ['type', 'txn type', 'transaction type', 'cr dr', 'dr cr', 'income expense', 'in out', 'kind', 'direction'],
   category: ['category', 'head', 'tag', 'group', 'expense category', 'expense type'],
   paymentMethod: ['payment method', 'mode', 'method', 'payment mode', 'paid via', 'payment', 'via', 'channel'],
   notes: ['notes', 'note', 'comment', 'comments', 'memo'],
-  borrower: ['borrower', 'borrower name', 'name', 'person', 'party', 'given to', 'lent to', 'to', 'customer'],
+  borrower: ['borrower', 'borrower name', 'name', 'person', 'party', 'party name', 'given to', 'lent to', 'to', 'customer', 'remark', 'remarks', 'description', 'narration', 'particulars', 'details'],
   phone: ['phone', 'mobile', 'contact', 'phone number', 'mobile number', 'mobile no', 'phone no'],
-  principal: ['amount lent', 'principal', 'loan amount', 'lent', 'given', 'amount given', 'amount'],
+  principal: ['amount lent', 'principal', 'loan amount', 'lent', 'given', 'amount given', 'cash out', 'money out', 'paid out', 'amount'],
   startDate: ['date lent', 'start date', 'loan date', 'given on', 'lent on', 'date given', 'date'],
   dueDate: ['due date', 'due', 'return date', 'repay by', 'due on'],
   interestRate: ['interest rate', 'interest', 'rate', 'roi', 'interest %', 'rate %'],
-  repaid: ['repaid', 'amount repaid', 'paid back', 'returned', 'received', 'paid'],
+  repaid: ['repaid', 'amount repaid', 'paid back', 'returned', 'received', 'paid', 'cash in', 'money in'],
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9%]+/g, ' ').trim();
@@ -272,12 +272,35 @@ export function autoMap<F extends string>(headers: string[], fields: F[]): Parti
   return map;
 }
 
-export function guessTarget(table: RawTable, headerRow: number): ImportTarget {
-  const name = table.name.toLowerCase();
-  if (/loan|lent|borrow/.test(name) && !/repayment|outstanding/.test(name)) return 'loans';
+/** Words in a file or sheet name that mean "money lent on interest". */
+const LOAN_NAME = /loan|lent|lend|borrow|intrest|interest|intres|udhar|udhaar|baki|chit|given money/i;
+
+export function guessTarget(table: RawTable, headerRow: number, fileName = ''): ImportTarget {
+  const name = `${table.name} ${fileName}`.toLowerCase();
+  if (LOAN_NAME.test(name) && !/repayment|outstanding/.test(name)) return 'loans';
   const h = table.rows[headerRow] ?? [];
-  const loanish = h.filter((c) => ['borrower', 'dueDate', 'interestRate', 'repaid'].some((f) => matchScore(c, f) >= 2)).length;
-  return loanish >= 2 ? 'loans' : 'transactions';
+  // Strong loan-only columns (a generic "Remark"/"Cash In" isn't enough on its own).
+  const loanish = h.filter((c) => ['dueDate', 'interestRate'].some((f) => matchScore(c, f) >= 2) || /borrower|lent to|given to/i.test(c)).length;
+  return loanish >= 1 ? 'loans' : 'transactions';
+}
+
+/**
+ * Pulls a person's name out of a free-text remark such as
+ * "Sati mavIntrestes recieved dec 18 2025" → "Sati mav",
+ * "Devraj shetty (vivek) 09 jun in google pay" → "Devraj shetty".
+ */
+export function cleanBorrowerName(raw: string): string {
+  const text = raw.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\s+/g, ' ').trim();
+  const stop = /^(intrest|intrestes|interest|interests|int|recieved|received|recived|reciev|given|gave|sent|paid|for|on|in|at|to|by|via|from|gpay|google|phonepe|paytm|upi|cash|amount|rs|inr|jan|feb|mar|apr|may|jun|june|jul|july|aug|sep|sept|oct|nov|dec|january|february|march|april|august|september|october|november|december|total|mine|around|loan|and|&)$/i;
+  const out: string[] = [];
+  for (const w of text.split(' ')) {
+    if (!w) continue;
+    if (/[\d(₹]/.test(w) || stop.test(w.replace(/[.,:;-]+$/, ''))) break;
+    out.push(w.replace(/[.,:;-]+$/, ''));
+    if (out.length === 3) break;
+  }
+  const name = out.join(' ').trim();
+  return (name || text).slice(0, 80);
 }
 
 /** Default type suggested by the sheet name (our own exports use one sheet per section). */
@@ -530,25 +553,34 @@ export interface LoanDraft {
   issues: string[];
 }
 
-export function buildLoanDrafts(rows: string[][], map: Partial<Record<LoanField, number>>, dateOrder: 'dmy' | 'mdy'): LoanDraft[] {
+export interface LoanImportOptions {
+  /** Interest rate used when the file has none (0 = no interest). */
+  defaultRate?: number;
+  /** Months after the date lent used as due date when the file has none. */
+  termMonths?: number;
+}
+
+export function buildLoanDrafts(rows: string[][], map: Partial<Record<LoanField, number>>, dateOrder: 'dmy' | 'mdy', opts: LoanImportOptions = {}): LoanDraft[] {
+  const term = opts.termMonths && opts.termMonths > 0 ? Math.round(opts.termMonths) : 12;
   const get = (r: string[], f: LoanField) => (map[f] !== undefined ? (r[map[f]!] ?? '').toString().trim() : '');
   const out: LoanDraft[] = [];
   rows.forEach((r, idx) => {
     if (r.every((c) => !String(c ?? '').trim())) return;
     if (headerScore(r) >= 2) return;
-    const name = get(r, 'borrower');
-    if (/^(total|grand total)$/i.test(name)) return;
+    const rawName = get(r, 'borrower');
+    if (/^(total|grand total|opening balance|closing balance)$/i.test(rawName)) return;
+    const name = rawName ? cleanBorrowerName(rawName) : '';
     const principal = parseAmount(get(r, 'principal'))?.value ?? null;
     if (!name && principal === null) return;
     const start = parseDateLoose(get(r, 'startDate'), dateOrder);
     const dueParsed = parseDateLoose(get(r, 'dueDate'), dateOrder);
-    const rate = parseAmount(get(r, 'interestRate').replace('%', ''))?.value ?? 0;
+    const rate = parseAmount(get(r, 'interestRate').replace('%', ''))?.value ?? opts.defaultRate ?? 0;
     const repaid = parseAmount(get(r, 'repaid'))?.value ?? 0;
     const issues: string[] = [];
     if (!name) issues.push('Missing borrower name');
-    if (!(principal && principal > 0)) issues.push('Missing or invalid amount lent');
+    if (!(principal && principal > 0)) issues.push(repaid > 0 ? 'Money received, not lent: add it as a repayment on the person\'s record' : 'Missing or invalid amount lent');
     if (!start) issues.push(get(r, 'startDate') ? `Unrecognised date "${get(r, 'startDate')}"` : 'Missing date lent');
-    const due = dueParsed ?? (start ? addMonths(start, 12) : '');
+    const due = dueParsed ?? (start ? addMonths(start, term) : '');
     if (start && due && due <= start) issues.push('Due date must be after the date lent');
     out.push({
       row: idx,
@@ -559,7 +591,10 @@ export function buildLoanDrafts(rows: string[][], map: Partial<Record<LoanField,
       dueDate: due,
       interestRate: rate,
       repaid,
-      notes: [get(r, 'notes'), dueParsed ? '' : 'Due date not in file — set to 12 months after lending.'].filter(Boolean).join(' ').slice(0, 1000),
+      notes: [rawName && rawName !== name ? rawName : '', get(r, 'notes'), dueParsed ? '' : `Due date not in file: set to ${term} months after lending.`]
+        .filter(Boolean)
+        .join(' · ')
+        .slice(0, 1000),
       status: issues.length ? 'error' : 'ok',
       issues,
     });

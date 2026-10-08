@@ -61,6 +61,8 @@ interface State extends DataSnapshot {
   loadSampleData: () => Result;
   /** Moves everything to Trash (recoverable). Nothing is ever erased permanently. */
   moveAllToTrash: () => Result;
+  /** Moves a set of records (e.g. one import batch) to Trash. */
+  trashMany: (txIds: string[], loanIds: string[], label: string) => Result;
 
   addNote: (name: string, description: string) => Promise<{ id: string; result: CommitResult }>;
   updateNote: (id: string, patch: { name: string; description: string }) => Result;
@@ -461,6 +463,17 @@ export const useStore = create<State>()((_set, get) => {
       ]);
     },
 
+    trashMany: async (txIds, loanIds, label) => {
+      const s = get();
+      const at = nowISO();
+      const t = new Set(txIds);
+      const l = new Set(loanIds);
+      return commit([
+        ...s.transactions.filter((x) => t.has(x.id) && !x.deletedAt).map((x): Op => ({ kind: 'tx', op: 'put', doc: { ...x, deletedAt: at } })),
+        ...s.loans.filter((x) => l.has(x.id) && !x.deletedAt).map((x): Op => ({ kind: 'loan', op: 'put', doc: { ...x, deletedAt: at } })),
+        activity({ action: 'deleted', entity: 'data', label }),
+      ]);
+    },
     moveAllToTrash: async () => {
       const s = get();
       const at = nowISO();

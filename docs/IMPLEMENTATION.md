@@ -206,6 +206,13 @@ Daily / Weekly / Monthly / Yearly with previous/next navigation.
 2. **Settings:** sheet, *Import as* (Income & expenses / Interest records), header row (auto-detected), date format (DD/MM default), column mapping (auto-matched, adjustable), the default type for unsigned amounts, and whether rates are % per month or per year.
 3. **Preview:** every row is *Ready*, *Duplicate* (skipped unless ticked) or *Needs fixing* (with the reason). Cells are editable.
 
+**CashBook-app exports** (columns *Date, Time, Remark, Entry by, Mode, Cash In, Cash Out, Balance*) are supported:
+- If the file name contains *intrest / interest / loan / lend / udhar…* (e.g. `My_intrest_savings_…CashBook.csv`), it is imported as **Interest records** automatically: **Remark → person** (name cleaned, e.g. "Devraj shetty (vivek) 09 jun in google pay" → *Devraj shetty*; the full remark is kept in notes), **Cash Out → amount lent**, **Date → date lent**.
+- Options for interest records: **Interest % if not in file** (applied to every row) and **Due after (months)** (default 12).
+- Other CashBook files import as income & expenses (Remark → description, Cash In/Cash Out → type and amount, Mode → payment method).
+
+**Undo an import:** Settings → **Recent imports** → **Undo import** moves the whole batch to Trash (restorable). Use it if a file went into the wrong section.
+
 It understands bank statements (Withdrawal/Deposit, Cr/Dr), amounts like `₹1,00,000.50`, `Rs. 4,500`, `(250)`, and dates like `01/10/2026`, `15-Dec-2026`, `1 Oct 2026` or Excel serial numbers. It guesses categories (Swiggy → Food, HP → Petrol/Fuel, Uber/IRCTC → Travel…) and payment methods (UPI/GPay → UPI, NEFT → Bank Transfer…), and skips total and balance lines.
 
 ---
@@ -594,5 +601,6 @@ VITE_FIREBASE_EMULATOR=true npm run dev
 | 02 Oct 2026 | Receive Interest with history and next due; all-borrowers list with edit; Monthly books with day-wise month view |
 | 02 Oct 2026 | Data safety: no permanent deletes (server-enforced), version history; installable offline app (precache, icons, Install button); separate Cash In / Cash Out books |
 | 02 Oct 2026 | Calculation Notes and Investments & Insurance; "Loans" renamed to **Interest Calculation**; phone menu Home · Cashbook · Interest · Notes · More |
+| 08 Oct 2026 | Import: CashBook exports of money lent go to **Interest records** (Remark → name, Cash Out → amount); default interest % and due months; **Undo import** in Settings |
 | 08 Oct 2026 | Dashboard: top card shows **this month's** Cash In and Cash Out separately; new **All Cash In & Cash Out** section with month-by-month totals |
 | 02 Oct 2026 | Notes & Investments made fully flexible: unlimited records, any name/type, optional amount, entries grouped by month |

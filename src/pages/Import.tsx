@@ -72,6 +72,8 @@ export default function ImportData() {
   const [dateOrder, setDateOrder] = useState<'dmy' | 'mdy'>('dmy');
   const [defaultType, setDefaultType] = useState<TxType>('expense');
   const [rateUnit, setRateUnit] = useState<'monthly' | 'yearly'>('monthly');
+  const [defaultRate, setDefaultRate] = useState('');
+  const [termMonths, setTermMonths] = useState('12');
   const [txEdits, setTxEdits] = useState<Record<number, Partial<TxDraft>>>({});
   const [loanEdits, setLoanEdits] = useState<Record<number, Partial<LoanDraft>>>({});
   const [excluded, setExcluded] = useState<Record<number, boolean>>({});
@@ -91,10 +93,10 @@ export default function ImportData() {
     setPage(0);
   };
 
-  const configure = (ts: RawTable[], idx: number) => {
+  const configure = (ts: RawTable[], idx: number, name = fileName) => {
     const t = ts[idx];
     const h = detectHeaderRow(t.rows);
-    const tgt = guessTarget(t, h);
+    const tgt = guessTarget(t, h, name);
     setSheet(idx);
     setHeaderRow(h);
     setTarget(tgt);
@@ -124,7 +126,7 @@ export default function ImportData() {
       setFileName(file.name);
       // Prefer the sheet with the most rows for the first view.
       const first = ts.reduce((bi, t, i) => (t.rows.length > ts[bi].rows.length ? i : bi), 0);
-      configure(ts, first);
+      configure(ts, first, file.name);
       setStep('map');
     } catch (e) {
       console.error(e);
@@ -143,10 +145,10 @@ export default function ImportData() {
 
   const loanDrafts = useMemo(() => {
     if (target !== 'loans' || !table) return [];
-    const base = buildLoanDrafts(dataRows, loanMap, dateOrder);
+    const base = buildLoanDrafts(dataRows, loanMap, dateOrder, { defaultRate: parseFloat(defaultRate) || 0, termMonths: parseInt(termMonths) || 12 });
     const edited = base.map((d) => (loanEdits[d.row] ? validateLoanDraft({ ...d, ...loanEdits[d.row] }) : d));
     return markLoanDuplicates(edited, loansAll);
-  }, [target, table, dataRows, loanMap, dateOrder, loanEdits, loansAll]);
+  }, [target, table, dataRows, loanMap, dateOrder, loanEdits, loansAll, defaultRate, termMonths]);
 
   const drafts: (TxDraft | LoanDraft)[] = target === 'transactions' ? txDrafts : loanDrafts;
   const isIncluded = (d: { row: number; status: string }) => d.status !== 'error' && (excluded[d.row] ?? d.status === 'duplicate') === false;
@@ -164,7 +166,7 @@ export default function ImportData() {
   const hasRequired = target === 'transactions' ? txMap.date !== undefined && hasAmount : loanMap.borrower !== undefined && loanMap.principal !== undefined && loanMap.startDate !== undefined;
 
   const confirmImport = async () => {
-    const label = `Imported ${selected.length} ${target === 'transactions' ? 'transactions' : 'loans'} from ${fileName}`;
+    const label = `Imported ${selected.length} ${target === 'transactions' ? 'transactions' : 'interest records'} from ${fileName}`;
     const ok = await run(
       () =>
         target === 'transactions'
@@ -189,7 +191,7 @@ export default function ImportData() {
         </div>
         <h2 className="text-xl font-bold">Import complete</h2>
         <p className="mt-1 text-slate-500 dark:text-slate-400">
-          {doneCount.n} {doneCount.target === 'transactions' ? 'transactions' : 'loans'} were saved.
+          {doneCount.n} {doneCount.target === 'transactions' ? 'transactions' : 'interest records'} were saved.
         </p>
         <div className="mt-6 flex justify-center gap-2">
           <button
@@ -203,7 +205,7 @@ export default function ImportData() {
             Import another file
           </button>
           <Link to={doneCount.target === 'transactions' ? '/transactions' : '/loans'} className="btn-primary">
-            View {doneCount.target === 'transactions' ? 'transactions' : 'loans'}
+            View {doneCount.target === 'transactions' ? 'transactions' : 'interest records'}
           </Link>
         </div>
       </div>
@@ -297,7 +299,7 @@ export default function ImportData() {
                   }}
                   options={[
                     { value: 'transactions', label: <span className="flex items-center justify-center gap-1.5"><ReceiptText size={14} /> Income & expenses</span> },
-                    { value: 'loans', label: <span className="flex items-center justify-center gap-1.5"><HandCoins size={14} /> Loans (money lent)</span> },
+                    { value: 'loans', label: <span className="flex items-center justify-center gap-1.5"><HandCoins size={14} /> Interest records (money lent)</span> },
                   ]}
                 />
               </div>
@@ -372,7 +374,9 @@ export default function ImportData() {
               </div>
               {!hasRequired && (
                 <p className="mt-2 text-sm font-medium text-amber-600">
-                  {target === 'transactions' ? 'Map the date and an amount (or debit/credit) column to continue.' : 'Map borrower, amount lent and date lent to continue.'}
+                  {target === 'transactions'
+                    ? 'Map the date and an amount (or debit/credit) column to continue.'
+                    : 'Map borrower (e.g. the Remark / Name column), amount lent (e.g. Cash Out) and date lent to continue.'}
                 </p>
               )}
             </div>
@@ -395,18 +399,51 @@ export default function ImportData() {
                   />
                 </div>
               ) : (
-                <div>
-                  <span className="label">Interest rates in file are</span>
-                  <Segmented
-                    className="w-full"
-                    value={rateUnit}
-                    onChange={setRateUnit}
-                    options={[
-                      { value: 'monthly', label: '% per month' },
-                      { value: 'yearly', label: '% per year' },
-                    ]}
-                  />
-                </div>
+                <>
+                  <div>
+                    <span className="label">Interest rates are</span>
+                    <Segmented
+                      className="w-full"
+                      value={rateUnit}
+                      onChange={setRateUnit}
+                      options={[
+                        { value: 'monthly', label: '% per month' },
+                        { value: 'yearly', label: '% per year' },
+                      ]}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-sm">
+                      <span className="label">Interest % if not in file</span>
+                      <input
+                        className="input num"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="e.g. 2"
+                        value={defaultRate}
+                        onChange={(e) => {
+                          setDefaultRate(e.target.value);
+                          setLoanEdits({});
+                        }}
+                      />
+                    </label>
+                    <label className="text-sm">
+                      <span className="label">Due after (months)</span>
+                      <input
+                        className="input num"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={termMonths}
+                        onChange={(e) => {
+                          setTermMonths(e.target.value);
+                          setLoanEdits({});
+                        }}
+                      />
+                    </label>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -554,7 +591,7 @@ export default function ImportData() {
               )}
               <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white px-4 py-3 dark:border-white/5 dark:bg-ink-850 sm:px-5">
                 <span className="text-sm">
-                  <b>{selected.length}</b> {target === 'transactions' ? 'transactions' : 'loans'} selected · {formatINR(selectedTotal)}
+                  <b>{selected.length}</b> {target === 'transactions' ? 'transactions' : 'interest records'} selected · {formatINR(selectedTotal)}
                 </span>
                 <button className="btn-primary" disabled={!selected.length || saving} onClick={confirmImport}>
                   {saving ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} Import {selected.length} records

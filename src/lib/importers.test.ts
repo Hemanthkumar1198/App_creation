@@ -6,6 +6,7 @@ import {
   buildTxDrafts,
   detectHeaderRow,
   draftsToLoans,
+  cleanBorrowerName,
   groupLines,
   guessTarget,
   markTxDuplicates,
@@ -134,5 +135,49 @@ describe('pdf table reconstruction', () => {
       ['01/10/2026', 'Groceries', '4,500.00'],
       ['02/10/2026', 'Petrol', '3,000.00'],
     ]);
+  });
+});
+
+describe('CashBook-app export of money lent (Date, Remark, Cash In, Cash Out…)', () => {
+  const csv = [
+    '"Date","Time","Remark","Entry by","Mode","Cash In","Cash Out","Balance"',
+    '"09 June 2024","10:56 pm","Ravi mamaIntrestes recieved dec 18 2025","Me","Cash",,20000,-20000',
+    '"08 April 2025","2:08 pm","Suresh anna","Me","Cash",,20000,-40000',
+    '"20 April 2025","7:00 pm","Kiran mava recived intrest on may","Me","Cash",,10000,-50000',
+    '"03 June 2026","7:57 pm","Mohan rao (bunty) 09 jun in google pay","Me","",,30000,-80000',
+    '"13 June 2026","8:06 pm","Gopal krishna jun 13 and jun 22 in gpay","Me","",,30000,-110000',
+  ].join('\n');
+
+  it('is recognised as interest records from the file name and maps Remark / Cash Out / Date', () => {
+    const rows = parseCSV(csv);
+    const h = detectHeaderRow(rows);
+    expect(h).toBe(0);
+    expect(guessTarget({ name: 'CSV', rows }, h, 'My_intrest_savings_08-10-2026_CashBook.csv')).toBe('loans');
+    expect(guessTarget({ name: 'CSV', rows }, h, 'July_expenses_CashBook.csv')).toBe('transactions');
+    const map = autoMap(rows[h], LOAN_FIELDS.map((f) => f.key));
+    expect(map).toMatchObject({ startDate: 0, borrower: 2, principal: 6, repaid: 5 });
+  });
+
+  it('creates one interest record per row with clean names, amounts and dates', () => {
+    const rows = parseCSV(csv);
+    const map = autoMap(rows[0], LOAN_FIELDS.map((f) => f.key));
+    const d = buildLoanDrafts(rows.slice(1), map, 'dmy', { defaultRate: 2, termMonths: 12 });
+    expect(d.map((x) => x.status)).toEqual(['ok', 'ok', 'ok', 'ok', 'ok']);
+    expect(d.map((x) => x.borrowerName)).toEqual(['Ravi mama', 'Suresh anna', 'Kiran mava', 'Mohan rao', 'Gopal krishna']);
+    expect(d.map((x) => x.principal)).toEqual([20000, 20000, 10000, 30000, 30000]);
+    expect(d[0]).toMatchObject({ startDate: '2024-06-09', dueDate: '2025-06-09', interestRate: 2 });
+    expect(d[0].notes).toContain('recieved dec 18 2025'); // full remark kept in notes
+  });
+
+  it('also imports as normal transactions with Remark as description', () => {
+    const rows = parseCSV(csv);
+    const map = autoMap(rows[0], TX_FIELDS.map((f) => f.key));
+    expect(map).toMatchObject({ date: 0, description: 2, credit: 5, debit: 6, paymentMethod: 4 });
+  });
+
+  it('cleans names from free-text remarks', () => {
+    expect(cleanBorrowerName('Arun mava')).toBe('Arun mava');
+    expect(cleanBorrowerName('Ramesh mava given around apr may')).toBe('Ramesh mava');
+    expect(cleanBorrowerName('Ramkrishna uncl')).toBe('Ramkrishna uncl');
   });
 });
