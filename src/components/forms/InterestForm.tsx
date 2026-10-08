@@ -1,5 +1,6 @@
-import { Loader2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import clsx from 'clsx';
+import { CheckCircle2, HandCoins, HelpCircle, Loader2, Percent } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Field, Row } from '../ui/common';
 import { PAYMENT_METHODS } from '../../lib/categories';
@@ -9,17 +10,34 @@ import { formatINR } from '../../lib/format';
 import { computeLoan, suggestRepaymentSplit } from '../../lib/loans';
 import { useSave } from '../../lib/useSave';
 import { useStore } from '../../store/useStore';
-import type { PaymentMethod } from '../../types';
+import type { Loan, PaymentMethod } from '../../types';
 
-/**
- * "Receive interest": records an interest-only payment from a borrower. The payment
- * date becomes the start of the next interest period, so what's due next is tracked from it.
- */
+type Mode = 'interest' | 'unknown' | 'full';
+
+/** "Receive interest" sheet. */
 export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () => void }) {
   const loan = useStore((s) => s.loans.find((l) => l.id === loanId));
+  if (!loan) return null;
+  const principal = computeLoan(loan).remainingPrincipal;
+  return (
+    <Sheet title="Receive interest" subtitle={`From ${loan.borrowerName} · amount lent ${formatINR(principal)}`} onClose={onClose}>
+      <ReceiveInterestPanel loan={loan} onDone={onClose} onCancel={onClose} />
+    </Sheet>
+  );
+}
+
+/**
+ * Three ways to record what a borrower paid:
+ * - Interest amount received (full interest till the date, or only part of it)
+ * - Interest received, amount not known: interest simply restarts from the date
+ * - Full loan amount received: amount lent + interest, the record is closed as Fully Repaid
+ */
+export function ReceiveInterestPanel({ loan, onDone, onCancel }: { loan: Loan; onDone?: () => void; onCancel?: () => void }) {
   const lastMethod = useStore((s) => s.settings.lastPaymentMethod);
   const addRepayment = useStore((s) => s.addRepayment);
+  const closeLoan = useStore((s) => s.closeLoan);
   const { saving, run } = useSave();
+  const [mode, setMode] = useState<Mode>('interest');
   const [date, setDate] = useState(todayISO());
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>(lastMethod);
@@ -27,60 +45,94 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
   const [full, setFull] = useState(true);
   const [error, setError] = useState('');
 
-  const summary = useMemo(() => (loan ? computeLoan(loan) : null), [loan]);
-  const due = useMemo(() => (loan ? suggestRepaymentSplit(loan, 0, date) : null), [loan, date]);
-  if (!loan || !summary || !due) return null;
-
+  const summary = useMemo(() => computeLoan(loan), [loan]);
+  const due = useMemo(() => suggestRepaymentSplit(loan, 0, date), [loan, date]);
   const value = round2(parseFloat(amount) || 0);
+  const hasRate = loan.interestRate > 0;
   const periodLabel = summary.interestPeriodMonths === 1 ? '1 month' : `${summary.interestPeriodMonths} months`;
+  const fullTotal = round2(due.principalDue + due.interestDue);
 
-  const save = async () => {
-    if (!(value > 0)) return setError('Enter the interest amount received');
-    if (date < loan.startDate) return setError(`Date cannot be before the loan start (${formatDate(loan.startDate)})`);
-    const ok = await run(
-      () => addRepayment(loan.id, { amount: value, date, paymentMethod: method, principalPortion: 0, interestPortion: value, notes: notes.trim() || 'Interest received', settlesInterest: full }),
-      `Interest of ${formatINR(value)} received from ${loan.borrowerName}`,
-    );
-    if (ok) onClose();
+  const pickMode = (m: Mode) => {
+    setMode(m);
+    setError('');
+    setAmount(m === 'full' ? String(fullTotal) : '');
   };
 
-  return (
-    <Sheet
-      title="Receive interest"
-      subtitle={`From ${loan.borrowerName} · principal stays ${formatINR(summary.remainingPrincipal)}`}
-      onClose={onClose}
-      footer={
-        <div className="flex gap-2">
-          <button className="btn-secondary flex-1" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn flex-1 bg-sky-600 text-white hover:bg-sky-700" onClick={save} disabled={saving}>
-            {saving && <Loader2 size={16} className="animate-spin" />}
-            {saving ? 'Saving…' : 'Save interest'}
-          </button>
-        </div>
-      }
-    >
-      <div className="space-y-5">
-        <div className="rounded-2xl bg-sky-50 px-4 py-1 dark:bg-sky-500/10">
-          <Row label="Last interest received" value={summary.lastInterestPayment ? `${formatINR(summary.lastInterestPayment.amount)} on ${formatDate(summary.lastInterestPayment.date)}` : 'Never'} />
-          {loan.interestRate > 0 ? (
-            <>
-              <Row label={`Interest due as of ${formatDate(date)}`} value={formatINR(due.interestDue, { paise: true })} tone="interest" strong />
-              <Row label={`Interest for ${periodLabel}`} value={formatINR(summary.interestPerPeriod, { paise: true })} />
-            </>
-          ) : (
-            <p className="py-2 text-xs text-slate-500 dark:text-slate-400">No interest rate set, so just enter what was received. Set the rate with Edit to see what's due.</p>
-          )}
-        </div>
+  const reset = () => {
+    setAmount('');
+    setNotes('');
+    setError('');
+  };
 
+  const save = async () => {
+    if (date < loan.startDate) return setError(`Date cannot be before the lending date (${formatDate(loan.startDate)})`);
+    const note = notes.trim();
+    let ok = false;
+    if (mode === 'unknown') {
+      ok = await run(
+        () => addRepayment(loan.id, { amount: 0, date, paymentMethod: method, principalPortion: 0, interestPortion: 0, notes: note || 'Interest received (amount not recorded)', settlesInterest: true }),
+        `Interest marked as received on ${formatDate(date)}. Fresh interest counted from this date.`,
+      );
+    } else if (mode === 'interest') {
+      if (!(value > 0)) return setError('Enter the interest amount received');
+      ok = await run(
+        () => addRepayment(loan.id, { amount: value, date, paymentMethod: method, principalPortion: 0, interestPortion: value, notes: note || 'Interest received', settlesInterest: full }),
+        `Interest of ${formatINR(value)} received on ${formatDate(date)}.${full ? ' Fresh interest counted from this date.' : ''}`,
+      );
+    } else {
+      if (!(value > 0)) return setError('Enter the total amount received');
+      if (value + 0.009 < due.principalDue)
+        return setError(`That's less than the amount still lent (${formatINR(due.principalDue)}). For part of the loan use "Add Repayment".`);
+      const principalPortion = due.principalDue;
+      const interestPortion = round2(value - principalPortion);
+      ok = await run(
+        () =>
+          closeLoan(loan.id, date, { amount: value, date, paymentMethod: method, principalPortion, interestPortion, notes: note || 'Full loan amount received', settlesInterest: true }),
+        `${loan.borrowerName} paid back in full (${formatINR(value)}). Record marked Fully Repaid.`,
+      );
+    }
+    if (ok) {
+      reset();
+      onDone?.();
+    }
+  };
+
+  const saveLabel = mode === 'full' ? 'Save & close record' : mode === 'unknown' ? 'Mark interest received' : 'Save interest';
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <ModeOption on={mode === 'interest'} onClick={() => pickMode('interest')} icon={<Percent size={16} />} title="Interest amount received" text="Enter how much interest they paid. The amount lent stays the same." />
+        <ModeOption on={mode === 'unknown'} onClick={() => pickMode('unknown')} icon={<HelpCircle size={16} />} title="Interest received, amount not known" text="Just mark interest as received. Fresh interest is counted from the date." />
+        <ModeOption on={mode === 'full'} onClick={() => pickMode('full')} icon={<HandCoins size={16} />} title="Full loan amount received" text="They returned the amount lent with interest. The record is closed as Fully Repaid." />
+      </div>
+
+      <div className="rounded-2xl bg-sky-50 px-4 py-1 dark:bg-sky-500/10">
+        <Row label="Last interest received" value={summary.lastInterestPayment ? `${summary.lastInterestPayment.amountUnknown ? 'Amount not recorded' : formatINR(summary.lastInterestPayment.amount)} · ${formatDate(summary.lastInterestPayment.date)}` : 'Never'} />
+        {mode === 'full' && <Row label="Amount lent (still with them)" value={formatINR(due.principalDue, { paise: true })} />}
+        {hasRate ? (
+          <>
+            <Row label={`Interest due as of ${formatDate(date)}`} value={formatINR(due.interestDue, { paise: true })} tone="interest" strong={mode !== 'full'} />
+            {mode === 'full' ? (
+              <Row label="Total to settle" value={formatINR(fullTotal, { paise: true })} strong />
+            ) : (
+              <Row label={`Interest for ${periodLabel}`} value={formatINR(summary.interestPerPeriod, { paise: true })} />
+            )}
+          </>
+        ) : (
+          <p className="py-2 text-xs text-slate-500 dark:text-slate-400">No interest rate set, so the app can't work out what's due. Set the rate with Edit, or just enter what was received.</p>
+        )}
+      </div>
+
+      {mode !== 'unknown' && (
         <div>
-          <label className="label" htmlFor="int-amount">Interest received</label>
+          <label className="label" htmlFor="int-amount">
+            {mode === 'full' ? 'Total amount received (amount lent + interest)' : 'Interest received'}
+          </label>
           <div className="flex items-center rounded-2xl border-2 border-sky-200 px-4 focus-within:border-sky-500 dark:border-sky-500/30">
             <span className="text-2xl font-bold text-sky-600">₹</span>
             <input
               id="int-amount"
-              autoFocus
               type="number"
               inputMode="decimal"
               min="0"
@@ -91,29 +143,44 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
                 setAmount(e.target.value);
                 setError('');
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  save();
+                }
+              }}
               className="num w-full bg-transparent px-2 py-3 text-2xl font-bold outline-none"
             />
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {due.interestDue > 0 && (
-              <button type="button" className="chip chip-off" onClick={() => setAmount(String(due.interestDue))}>
-                All due {formatINR(due.interestDue)}
-              </button>
-            )}
-            {summary.interestPerPeriod > 0 && (
-              <button type="button" className="chip chip-off" onClick={() => setAmount(String(summary.interestPerPeriod))}>
-                {periodLabel} {formatINR(summary.interestPerPeriod)}
-              </button>
-            )}
-          </div>
+          {mode === 'interest' && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {due.interestDue > 0 && (
+                <button type="button" className="chip chip-off" onClick={() => setAmount(String(due.interestDue))}>
+                  All due {formatINR(due.interestDue)}
+                </button>
+              )}
+              {summary.interestPerPeriod > 0 && (
+                <button type="button" className="chip chip-off" onClick={() => setAmount(String(summary.interestPerPeriod))}>
+                  {periodLabel} {formatINR(summary.interestPerPeriod)}
+                </button>
+              )}
+            </div>
+          )}
+          {mode === 'full' && value > 0 && value + 0.009 >= due.principalDue && (
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              {formatINR(due.principalDue)} amount lent + {formatINR(round2(value - due.principalDue))} interest
+            </p>
+          )}
         </div>
+      )}
 
-        <FullInterestToggle full={full} onChange={setFull} date={date} />
+      {mode === 'interest' && <FullInterestToggle full={full} onChange={setFull} date={date} />}
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Date received">
-            <input type="date" className="input" value={date} min={loan.startDate} onChange={(e) => setDate(e.target.value || todayISO())} />
-          </Field>
+      <div className={clsx('grid gap-3', mode === 'unknown' ? 'grid-cols-1' : 'grid-cols-2')}>
+        <Field label={mode === 'unknown' ? 'Interest received on' : 'Date received'}>
+          <input type="date" className="input" value={date} min={loan.startDate} onChange={(e) => setDate(e.target.value || todayISO())} />
+        </Field>
+        {mode !== 'unknown' && (
           <Field label="Payment method">
             <select className="input" value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
               {PAYMENT_METHODS.map((m) => (
@@ -121,16 +188,53 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
               ))}
             </select>
           </Field>
-        </div>
-        <Field label="Notes">
-          <input className="input" placeholder="e.g. Interest for October" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {full ? `Fresh interest is counted from ${formatDate(date)}.` : 'Interest not covered by this payment stays due.'} It is kept in Interest Calculation, not in daily Cash In.
-        </p>
-        {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
+        )}
       </div>
-    </Sheet>
+      <Field label="Description">
+        <input className="input" placeholder="e.g. Interest for October, paid at home" value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </Field>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        {mode === 'full'
+          ? 'Any interest not covered is written off when the record closes. You can reopen it later.'
+          : mode === 'unknown' || full
+            ? `All interest up to ${formatDate(date)} is cleared. Fresh interest is counted from this date.`
+            : 'Interest not covered by this payment stays due.'}{' '}
+        Kept in Interest Calculation, not in daily Cash In.
+      </p>
+      {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
+      <div className="flex gap-2">
+        {onCancel && (
+          <button type="button" className="btn-secondary flex-1" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+        <button type="button" className="btn flex-1 bg-sky-600 text-white hover:bg-sky-700" onClick={save} disabled={saving}>
+          {saving && <Loader2 size={16} className="animate-spin" />}
+          {saving ? 'Saving…' : saveLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ModeOption({ on, onClick, icon, title, text }: { on: boolean; onClick: () => void; icon: ReactNode; title: string; text: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      className={clsx(
+        'flex w-full items-start gap-3 rounded-2xl border-2 p-3 text-left transition',
+        on ? 'border-sky-500 bg-sky-50 dark:bg-sky-500/10' : 'border-slate-200 hover:border-slate-300 dark:border-white/10',
+      )}
+    >
+      <span className={clsx('mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl', on ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-500 dark:bg-white/10')}>{icon}</span>
+      <span className="min-w-0 flex-1 text-sm">
+        <span className="font-semibold">{title}</span>
+        <span className="block text-xs text-slate-500 dark:text-slate-400">{text}</span>
+      </span>
+      {on && <CheckCircle2 size={18} className="mt-1 shrink-0 text-sky-600" />}
+    </button>
   );
 }
 

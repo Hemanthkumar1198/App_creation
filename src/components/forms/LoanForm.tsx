@@ -3,7 +3,7 @@ import { Calculator, Loader2, Percent, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sheet } from '../ui/Sheet';
-import { FullInterestToggle } from './InterestForm';
+import { ReceiveInterestPanel } from './InterestForm';
 import { Field, Row, Segmented } from '../ui/common';
 import { addMonths, formatDate, monthsBetween, todayISO } from '../../lib/dates';
 import { round2 } from '../../lib/finance';
@@ -315,97 +315,48 @@ export function LoanForm({ editId, onClose }: { editId?: string; onClose: () => 
 }
 
 /**
- * Inside "Edit interest record": record interest received on a date (principal unchanged).
- * The next interest period is counted from that date. Past receipts are listed below.
+ * Inside "Edit interest record": record interest received (or the full loan amount),
+ * see the last/next interest dates and every receipt with its description.
  */
 function InterestReceivedBox({ loan }: { loan: Loan }) {
-  const addRepayment = useStore((s) => s.addRepayment);
-  const lastMethod = useStore((s) => s.settings.lastPaymentMethod);
   const open = useUI((s) => s.open);
-  const { saving, run } = useSave();
-  const [date, setDate] = useState(todayISO());
-  const [amount, setAmount] = useState('');
-  const [full, setFull] = useState(true);
-  const [error, setError] = useState('');
   const s = useMemo(() => computeLoan(loan), [loan]);
-  const value = round2(parseFloat(amount) || 0);
-
-  const save = async () => {
-    if (!(value > 0)) return setError('Enter the interest amount received');
-    if (date < loan.startDate) return setError(`Date cannot be before the lending date (${formatDate(loan.startDate)})`);
-    const ok = await run(
-      () => addRepayment(loan.id, { amount: value, date, paymentMethod: lastMethod, principalPortion: 0, interestPortion: value, notes: 'Interest received', settlesInterest: full }),
-      `Interest of ${formatINR(value)} received on ${formatDate(date)}.${full ? ' Fresh interest counted from this date.' : ''}`,
-    );
-    if (ok) {
-      setAmount('');
-      setError('');
-    }
-  };
-
   return (
     <div className="rounded-2xl border-2 border-sky-200 bg-sky-50/60 p-4 dark:border-sky-500/30 dark:bg-sky-500/10">
       <div className="flex items-center gap-2 text-sm font-bold text-sky-700 dark:text-sky-300">
-        <Percent size={16} /> Interest received (amount lent stays the same)
+        <Percent size={16} /> Interest received
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
         <div className="rounded-xl bg-white/70 p-2.5 dark:bg-white/5">
           <div className="text-slate-500 dark:text-slate-400">Last interest received</div>
-          <div className="mt-0.5 font-bold">{s.lastInterestPayment ? `${formatINR(s.lastInterestPayment.amount)} · ${formatDate(s.lastInterestPayment.date)}` : 'Never'}</div>
+          <div className="mt-0.5 font-bold">
+            {s.lastInterestPayment ? `${s.lastInterestPayment.amountUnknown ? 'Amount not recorded' : formatINR(s.lastInterestPayment.amount)} · ${formatDate(s.lastInterestPayment.date)}` : 'Never'}
+          </div>
         </div>
         <div className="rounded-xl bg-white/70 p-2.5 dark:bg-white/5">
           <div className="text-slate-500 dark:text-slate-400">Next interest due</div>
           <div className="mt-0.5 font-bold">{s.nextInterestDueDate ? formatDate(s.nextInterestDueDate) : '—'}</div>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Field label="Received on">
-          <input className="input" type="date" value={date} min={loan.startDate} onChange={(e) => setDate(e.target.value || todayISO())} />
-        </Field>
-        <Field label="Interest amount (₹)">
-          <input
-            className="input num"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            placeholder={s.interestPerPeriod > 0 ? String(s.interestPerPeriod) : '0'}
-            value={amount}
-            onChange={(e) => {
-              setAmount(e.target.value);
-              setError('');
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                save();
-              }
-            }}
-          />
-        </Field>
+      <div className="mt-4">
+        <ReceiveInterestPanel loan={loan} />
       </div>
-      <div className="mt-3">
-        <FullInterestToggle full={full} onChange={setFull} date={date} />
-      </div>
-      {error && <p className="mt-2 text-sm font-medium text-rose-600">{error}</p>}
-      <button type="button" className="btn mt-3 w-full bg-sky-600 text-white hover:bg-sky-700" onClick={save} disabled={saving}>
-        {saving && <Loader2 size={16} className="animate-spin" />}
-        {saving ? 'Saving…' : 'Save interest received'}
-      </button>
       {s.interestPayments.length > 0 && (
-        <div className="mt-3">
+        <div className="mt-4">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Interest received so far · {formatINR(s.interestRepaid)}</div>
           <ul className="mt-1 divide-y divide-sky-100 dark:divide-white/5">
             {[...s.interestPayments].reverse().map((p) => (
               <li key={p.id}>
-                <button type="button" className="flex w-full items-center justify-between gap-3 py-2 text-left text-sm" onClick={() => open({ kind: 'repayment', loanId: loan.id, editId: p.id })}>
-                  <span>
+                <button type="button" className="flex w-full items-start justify-between gap-3 py-2 text-left text-sm" onClick={() => open({ kind: 'repayment', loanId: loan.id, editId: p.id })}>
+                  <span className="min-w-0">
                     <span className="font-medium">{formatDate(p.date)}</span>
                     <span className="block text-xs text-slate-500 dark:text-slate-400">
                       for {formatDate(p.periodFrom)} → {formatDate(p.date)}
+                      {p.fullSettlement ? ' · fresh from here' : ' · part payment'}
                     </span>
+                    {p.notes && <span className="block break-words text-xs text-slate-600 dark:text-slate-300">{p.notes}</span>}
                   </span>
-                  <span className="num font-semibold text-sky-700 dark:text-sky-300">{formatINR(p.amount, { paise: true })}</span>
+                  <span className="num shrink-0 font-semibold text-sky-700 dark:text-sky-300">{p.amountUnknown ? 'Not recorded' : formatINR(p.amount, { paise: true })}</span>
                 </button>
               </li>
             ))}

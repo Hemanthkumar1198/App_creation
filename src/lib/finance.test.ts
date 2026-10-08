@@ -13,7 +13,7 @@ import {
   totalRepayment,
   yearlyInterest,
 } from './finance';
-import { computeLoan, expectedInterest, portfolio, suggestRepaymentSplit } from './loans';
+import { computeLoan, expectedInterest, loanDescription, portfolio, suggestRepaymentSplit } from './loans';
 import { computePlan, noteTotals } from './plans';
 
 const now = '2026-10-01T00:00:00.000Z';
@@ -215,6 +215,20 @@ describe('loan engine', () => {
     const part = loan({ ...l, repayments: [{ ...rep('2025-12-21', 5000, 0, 5000, 'a'), settlesInterest: false }] });
     const p = computeLoan(part, '2025-12-21');
     expect(p.remainingInterest).toBeGreaterThan(5000);
+  });
+
+  it('interest received with amount not known restarts interest from its date', () => {
+    const unknown = { ...rep('2025-12-21', 0, 0, 0, 'u'), settlesInterest: true };
+    const l = loan({ principal: 20000, interestRate: 3, startDate: '2024-06-09', dueDate: '2027-06-09', repayments: [unknown] });
+    const s = computeLoan(l, '2026-01-21');
+    expect(s.remainingInterest).toBe(600);
+    expect(s.interestRepaid).toBe(0);
+    expect(s.lastInterestPayment).toMatchObject({ date: '2025-12-21', amountUnknown: true, fullSettlement: true });
+    expect(s.nextInterestDueDate).toBe('2026-01-21');
+  });
+
+  it('cleans the old import note out of the description', () => {
+    expect(loanDescription(loan({ notes: 'Sati mav interest recieved dec 18 2025 · Due date not in file: set to 12 months after lending.' }))).toBe('Sati mav interest recieved dec 18 2025');
   });
 
   it('tracks interest received on a record with no rate set (e.g. imported)', () => {

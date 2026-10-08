@@ -592,7 +592,7 @@ export function buildLoanDrafts(rows: string[][], map: Partial<Record<LoanField,
       dueDate: due,
       interestRate: rate,
       repaid,
-      notes: [rawName && rawName !== name ? rawName : '', get(r, 'notes'), dueParsed ? '' : `Due date not in file: set to ${term} months after lending.`]
+      notes: [rawName && rawName !== name ? rawName : '', get(r, 'notes')]
         .filter(Boolean)
         .join(' · ')
         .slice(0, 1000),

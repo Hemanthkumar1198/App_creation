@@ -7,7 +7,7 @@ import { PAYMENT_METHODS } from '../../lib/categories';
 import { formatDate, todayISO } from '../../lib/dates';
 import { round2 } from '../../lib/finance';
 import { formatINR } from '../../lib/format';
-import { settlesInterest, suggestRepaymentSplit } from '../../lib/loans';
+import { isUnknownInterest, settlesInterest, suggestRepaymentSplit } from '../../lib/loans';
 import { FullInterestToggle } from './InterestForm';
 import { useStore } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
@@ -42,6 +42,13 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
   const iPortion = auto ? due.interestPortion : round2(parseFloat(interestPortion) || 0);
 
   const save = async () => {
+    // "Interest received, amount not known": keep it at ₹0 (only the date/description change).
+    if (existing && isUnknownInterest(existing) && value === 0) {
+      if (date < loan.startDate) return setError(`Date cannot be before the loan start (${formatDate(loan.startDate)})`);
+      const payload = { amount: 0, date, paymentMethod: method, principalPortion: 0, interestPortion: 0, notes: notes.trim(), settlesInterest: true };
+      if (await run(() => updateRepayment(loan.id, existing.id, payload), 'Interest receipt updated')) onClose();
+      return;
+    }
     if (!(value > 0)) return setError('Enter the amount received');
     if (date < loan.startDate) return setError(`Date cannot be before the loan start (${formatDate(loan.startDate)})`);
     if (value > due.outstanding + 0.009) return setError(`Repayment cannot exceed the outstanding amount of ${formatINR(due.outstanding, { paise: true })}`);

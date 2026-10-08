@@ -35,6 +35,10 @@ export interface InterestPayment {
   id: string;
   date: string;
   amount: number;
+  /** Marked as received without an amount. */
+  amountUnknown: boolean;
+  /** Cleared all interest up to its date (fresh interest from then). */
+  fullSettlement: boolean;
   /** Interest period this payment follows on from (previous interest payment or loan start). */
   periodFrom: string;
   paymentMethod: Repayment['paymentMethod'];
@@ -126,6 +130,16 @@ export function installmentDates(loan: Loan): string[] {
   }
   dates.push(loan.dueDate);
   return dates;
+}
+
+/** The record's description for lists, without the note older imports added about the due date. */
+export function loanDescription(loan: Loan): string {
+  return loan.notes.replace(/\s*(·\s*)?Due date not in file: set to \d+ months after lending\.?/g, '').trim();
+}
+
+/** Interest marked as received without knowing the amount (interest restarts from its date). */
+export function isUnknownInterest(r: Repayment): boolean {
+  return r.amount === 0 && r.settlesInterest === true;
 }
 
 /** Whether a receipt clears all interest up to its date (see Repayment.settlesInterest). */
@@ -253,8 +267,17 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
   const interestPayments: InterestPayment[] = [];
   let prevInterestDate = start;
   for (const r of reps) {
-    if (r.interestPortion <= 0) continue;
-    interestPayments.push({ id: r.id, date: r.date, amount: round2(r.interestPortion), periodFrom: prevInterestDate, paymentMethod: r.paymentMethod, notes: r.notes });
+    if (r.interestPortion <= 0 && !isUnknownInterest(r)) continue;
+    interestPayments.push({
+      id: r.id,
+      date: r.date,
+      amount: round2(r.interestPortion),
+      amountUnknown: isUnknownInterest(r),
+      fullSettlement: loan.interestType !== 'fixed' && settlesInterest(r),
+      periodFrom: prevInterestDate,
+      paymentMethod: r.paymentMethod,
+      notes: r.notes,
+    });
     prevInterestDate = r.date;
   }
   const lastInterestPayment = interestPayments.length ? interestPayments[interestPayments.length - 1] : null;

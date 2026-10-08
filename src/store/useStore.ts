@@ -198,7 +198,9 @@ function cleanRepayment(input: RepaymentInput): RepaymentInput {
     interestPortion: round2(input.interestPortion),
     notes: input.notes.trim().slice(0, 500),
   };
-  assertAmount(r.amount, 'Repayment amount');
+  // A ₹0 receipt is allowed only as "interest received, amount not known" (restarts interest).
+  const unknownInterest = r.amount === 0 && r.principalPortion === 0 && r.interestPortion === 0 && r.settlesInterest === true;
+  assertAmount(r.amount, 'Repayment amount', unknownInterest);
   assertDate(r.date, 'Repayment date');
   if (r.principalPortion < 0 || r.interestPortion < 0) throw new ValidationError('Principal and interest portions cannot be negative');
   if (Math.abs(round2(r.principalPortion + r.interestPortion) - r.amount) > 0.009) throw new ValidationError('Principal + interest must equal the repayment amount');
@@ -323,7 +325,7 @@ export const useStore = create<State>()((_set, get) => {
       assertWithinOutstanding(l, r);
       return commit([
         putLoan({ ...l, repayments: [...l.repayments, { ...r, id: uid(), createdAt: nowISO() }] }),
-        activity({ action: 'repayment', entity: 'repayment', label: `Received ${formatINR(r.amount)} from ${l.borrowerName}` }),
+        activity({ action: 'repayment', entity: 'repayment', label: r.amount > 0 ? `Received ${formatINR(r.amount)} from ${l.borrowerName}` : `Interest marked as received from ${l.borrowerName} (amount not recorded)` }),
       ]);
     },
     updateRepayment: async (loanId, repaymentId, input) => {

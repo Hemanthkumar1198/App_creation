@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { Loan, Transaction } from '../types';
 import { formatDate, relativeDays } from '../lib/dates';
 import { formatINR } from '../lib/format';
-import { describeRate, type LoanSummary } from '../lib/loans';
+import { describeRate, loanDescription, type LoanSummary } from '../lib/loans';
 import { useUI } from '../store/useUI';
 import { Amount, CategoryIcon, Progress, StatusBadge } from './ui/common';
 
@@ -51,6 +51,7 @@ export function LoanCard({ loan, s }: { loan: Loan; s: LoanSummary }) {
             )}
             {describeRate(loan)}
           </div>
+          {loanDescription(loan) && <div className="mt-1 line-clamp-2 text-xs text-slate-600 dark:text-slate-300">{loanDescription(loan)}</div>}
         </div>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2 text-xs">

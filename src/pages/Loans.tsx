@@ -7,7 +7,7 @@ import { EmptyState, PageHeader, Segmented, StatCard, StatusBadge } from '../com
 import { formatDate, relativeDays, todayISO } from '../lib/dates';
 import { downloadCSV, loansRows } from '../lib/export';
 import { formatINR } from '../lib/format';
-import { computeLoan, describeRate, portfolio } from '../lib/loans';
+import { computeLoan, describeRate, loanDescription, portfolio } from '../lib/loans';
 import { live } from '../lib/reports';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
@@ -241,6 +241,7 @@ export default function Loans() {
                               {loan.borrowerName}
                             </Link>
                             <div className="text-xs text-slate-500 dark:text-slate-400">{loan.phone || 'No phone'} · since {formatDate(loan.startDate)}</div>
+                            {loanDescription(loan) && <div className="mt-0.5 max-w-[18rem] whitespace-normal break-words text-xs text-slate-600 dark:text-slate-300">{loanDescription(loan)}</div>}
                           </td>
                           <td className="px-3 py-3 text-right">
                             <div className="font-semibold">{formatINR(s.principal)}</div>
@@ -249,7 +250,7 @@ export default function Loans() {
                           <td className="px-3 py-3 text-xs">
                             {s.lastInterestPayment ? (
                               <>
-                                <div className="font-semibold text-sky-600 dark:text-sky-300">{formatINR(s.lastInterestPayment.amount)}</div>
+                                <div className="font-semibold text-sky-600 dark:text-sky-300">{s.lastInterestPayment.amountUnknown ? 'Received' : formatINR(s.lastInterestPayment.amount)}</div>
                                 <div className="text-slate-500 dark:text-slate-400">{formatDate(s.lastInterestPayment.date)}</div>
                               </>
                             ) : (

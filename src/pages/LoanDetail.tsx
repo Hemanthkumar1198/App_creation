@@ -18,7 +18,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { EmptyState, Progress, Row, StatusBadge } from '../components/ui/common';
 import { formatDate, relativeDays, todayISO } from '../lib/dates';
 import { formatINR } from '../lib/format';
-import { computeLoan, describeRate } from '../lib/loans';
+import { computeLoan, describeRate, loanDescription } from '../lib/loans';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
 import { useSave } from '../lib/useSave';
@@ -223,7 +223,7 @@ export default function LoanDetail() {
               <Row label="Loan status" value={<StatusBadge status={s.status} />} />
             </div>
           </div>
-          {loan.notes && <p className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-white/5 dark:text-slate-300">{loan.notes}</p>}
+          {loanDescription(loan) && <p className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-white/5 dark:text-slate-300">{loanDescription(loan)}</p>}
         </section>
       </div>
 
@@ -244,7 +244,7 @@ export default function LoanDetail() {
           <div className="mt-3 grid gap-3 px-4 sm:grid-cols-3 sm:px-5">
             <div className="rounded-2xl bg-slate-50 p-3 dark:bg-white/5">
               <div className="text-xs text-slate-500 dark:text-slate-400">Last received</div>
-              <div className="num mt-0.5 font-bold">{s.lastInterestPayment ? formatINR(s.lastInterestPayment.amount, { paise: true }) : '—'}</div>
+              <div className="num mt-0.5 font-bold">{s.lastInterestPayment ? (s.lastInterestPayment.amountUnknown ? 'Amount not recorded' : formatINR(s.lastInterestPayment.amount, { paise: true })) : '—'}</div>
               <div className="text-xs text-slate-500 dark:text-slate-400">{s.lastInterestPayment ? formatDate(s.lastInterestPayment.date) : 'No interest received yet'}</div>
             </div>
             <div className="rounded-2xl bg-slate-50 p-3 dark:bg-white/5">
@@ -274,24 +274,25 @@ export default function LoanDetail() {
               <table className="num w-full min-w-[520px] text-sm">
                 <thead>
                   <tr className="border-y border-slate-100 bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-white/5 dark:bg-white/[0.02] dark:text-slate-400">
-                    <th className="px-4 py-2.5 sm:px-5">Received on</th>
+                    <th className="px-4 py-2.5 sm:px-5">Received on · description</th>
                     <th className="px-3 py-2.5">For period</th>
                     <th className="px-3 py-2.5 text-right">Interest</th>
-                    <th className="px-4 py-2.5 sm:px-5">Method · notes</th>
+                    <th className="px-4 py-2.5 sm:px-5">Method</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 dark:divide-white/[0.03]">
                   {[...s.interestPayments].reverse().map((p) => (
                     <tr key={p.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => open({ kind: 'repayment', loanId: loan.id, editId: p.id })}>
-                      <td className="px-4 py-2.5 font-medium sm:px-5">{formatDate(p.date)}</td>
-                      <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400">
+                      <td className="px-4 py-2.5 align-top sm:px-5">
+                        <div className="font-medium">{formatDate(p.date)}</div>
+                        {p.notes && <div className="max-w-[16rem] whitespace-normal break-words text-xs text-slate-600 dark:text-slate-300">{p.notes}</div>}
+                      </td>
+                      <td className="px-3 py-2.5 align-top text-slate-500 dark:text-slate-400">
                         {formatDate(p.periodFrom)} → {formatDate(p.date)}
+                        <div className="text-xs">{p.fullSettlement ? 'Fresh interest from here' : 'Part payment'}</div>
                       </td>
-                      <td className="px-3 py-2.5 text-right font-semibold text-sky-600 dark:text-sky-300">{formatINR(p.amount, { paise: true })}</td>
-                      <td className="px-4 py-2.5 text-slate-500 dark:text-slate-400 sm:px-5">
-                        {p.paymentMethod}
-                        {p.notes ? ` · ${p.notes}` : ''}
-                      </td>
+                      <td className="px-3 py-2.5 text-right align-top font-semibold text-sky-600 dark:text-sky-300">{p.amountUnknown ? 'Not recorded' : formatINR(p.amount, { paise: true })}</td>
+                      <td className="px-4 py-2.5 align-top text-slate-500 dark:text-slate-400 sm:px-5">{p.amountUnknown ? '—' : p.paymentMethod}</td>
                     </tr>
                   ))}
                 </tbody>
