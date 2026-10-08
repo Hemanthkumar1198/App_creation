@@ -33,9 +33,39 @@ const Investments = lazyPage(() => import('./pages/Investments'));
 const PlanDetail = lazyPage(() => import('./pages/PlanDetail'));
 const More = lazyPage(() => import('./pages/More'));
 
+/**
+ * Phone Back button / back gesture closes an open form instead of leaving the page.
+ * Opening a form adds one history entry on the same URL; Back pops it and closes the form.
+ * Any real page change also closes the form, so it never floats over another page.
+ */
+function useSheetBackButton(open: boolean) {
+  const loc = useLocation();
+  const close = useUI((s) => s.close);
+  useEffect(() => {
+    if (!open) return;
+    window.history.pushState({ ...(window.history.state ?? {}), plSheet: true }, '');
+    const onPop = () => {
+      if (useUI.getState().sheet) close();
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      // Closed with X / Save: drop the extra entry, unless the form already moved to another page.
+      setTimeout(() => {
+        if (window.history.state?.plSheet && !useUI.getState().sheet) window.history.back();
+      }, 0);
+    };
+  }, [open, close]);
+  useEffect(() => {
+    if (useUI.getState().sheet) close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.pathname]);
+}
+
 function SheetHost() {
   const sheet = useUI((s) => s.sheet);
   const close = useUI((s) => s.close);
+  useSheetBackButton(!!sheet);
   if (!sheet) return null;
   const body = (() => {
     switch (sheet.kind) {
@@ -43,8 +73,12 @@ function SheetHost() {
         return <TransactionForm key={sheet.editId ?? sheet.txType} txType={sheet.txType} editId={sheet.editId} defaultDate={sheet.defaultDate} onClose={close} />;
       case 'loan':
         return <LoanForm key={sheet.editId ?? 'new'} editId={sheet.editId} onClose={close} />;
-      case 'repayment':
+      case 'repayment': {
+        // Interest-only entries open in the interest form (amount / amount not known / remove).
+        const rep = sheet.editId ? useStore.getState().loans.find((l) => l.id === sheet.loanId)?.repayments.find((r) => r.id === sheet.editId) : undefined;
+        if (rep && rep.principalPortion <= 0) return <InterestForm key={rep.id} loanId={sheet.loanId} editId={rep.id} onClose={close} />;
         return <RepaymentForm key={sheet.editId ?? 'new'} loanId={sheet.loanId} editId={sheet.editId} onClose={close} />;
+      }
       case 'interest':
         return <InterestForm loanId={sheet.loanId} onClose={close} />;
       case 'topup':

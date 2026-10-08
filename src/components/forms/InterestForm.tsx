@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { CheckCircle2, HandCoins, HelpCircle, Loader2, Percent } from 'lucide-react';
+import { CheckCircle2, HandCoins, HelpCircle, Loader2, Percent, Trash2 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { Sheet } from '../ui/Sheet';
 import { Field, Row } from '../ui/common';
@@ -7,21 +7,27 @@ import { PAYMENT_METHODS } from '../../lib/categories';
 import { formatDate, todayISO } from '../../lib/dates';
 import { round2 } from '../../lib/finance';
 import { formatINR } from '../../lib/format';
-import { computeLoan, suggestRepaymentSplit } from '../../lib/loans';
+import { computeLoan, isUnknownInterest, settlesInterest, suggestRepaymentSplit } from '../../lib/loans';
 import { useSave } from '../../lib/useSave';
-import { useStore } from '../../store/useStore';
-import type { Loan, PaymentMethod } from '../../types';
+import { useStore, type RepaymentInput } from '../../store/useStore';
+import { useUI } from '../../store/useUI';
+import type { Loan, PaymentMethod, Repayment } from '../../types';
 
 type Mode = 'interest' | 'unknown' | 'full';
 
-/** "Receive interest" sheet. */
-export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () => void }) {
+/** "Receive interest" sheet, or "Edit interest received" when `editId` is an interest receipt. */
+export function InterestForm({ loanId, editId, onClose }: { loanId: string; editId?: string; onClose: () => void }) {
   const loan = useStore((s) => s.loans.find((l) => l.id === loanId));
   if (!loan) return null;
+  const edit = editId ? loan.repayments.find((r) => r.id === editId) : undefined;
   const principal = computeLoan(loan).remainingPrincipal;
   return (
-    <Sheet title="Receive interest" subtitle={`From ${loan.borrowerName} · amount lent ${formatINR(principal)}`} onClose={onClose}>
-      <ReceiveInterestPanel loan={loan} onDone={onClose} onCancel={onClose} />
+    <Sheet
+      title={edit ? 'Edit interest received' : 'Receive interest'}
+      subtitle={`${edit ? `${loan.borrowerName} · ${formatDate(edit.date)}` : `From ${loan.borrowerName}`} · amount lent ${formatINR(principal)}`}
+      onClose={onClose}
+    >
+      <ReceiveInterestPanel key={edit?.id ?? 'new'} loan={loan} edit={edit} onDone={onClose} onCancel={onClose} />
     </Sheet>
   );
 }
@@ -32,21 +38,26 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
  * - Interest received, amount not known: interest simply restarts from the date
  * - Full loan amount received: amount lent + interest, the record is closed as Fully Repaid
  */
-export function ReceiveInterestPanel({ loan, onDone, onCancel }: { loan: Loan; onDone?: () => void; onCancel?: () => void }) {
+export function ReceiveInterestPanel({ loan, edit, onDone, onCancel }: { loan: Loan; edit?: Repayment; onDone?: () => void; onCancel?: () => void }) {
   const lastMethod = useStore((s) => s.settings.lastPaymentMethod);
   const addRepayment = useStore((s) => s.addRepayment);
+  const updateRepayment = useStore((s) => s.updateRepayment);
+  const deleteRepayment = useStore((s) => s.deleteRepayment);
   const closeLoan = useStore((s) => s.closeLoan);
+  const confirm = useUI((s) => s.confirm);
   const { saving, run } = useSave();
-  const [mode, setMode] = useState<Mode>('interest');
-  const [date, setDate] = useState(todayISO());
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<PaymentMethod>(lastMethod);
-  const [notes, setNotes] = useState('');
-  const [full, setFull] = useState(true);
+  const [mode, setMode] = useState<Mode>(edit ? (isUnknownInterest(edit) ? 'unknown' : 'interest') : 'interest');
+  const [date, setDate] = useState(edit?.date ?? todayISO());
+  const [amount, setAmount] = useState(edit && edit.amount > 0 ? String(edit.amount) : '');
+  const [method, setMethod] = useState<PaymentMethod>(edit?.paymentMethod ?? lastMethod);
+  const [notes, setNotes] = useState(edit?.notes ?? '');
+  const [full, setFull] = useState(edit ? settlesInterest(edit) : true);
   const [error, setError] = useState('');
 
-  const summary = useMemo(() => computeLoan(loan), [loan]);
-  const due = useMemo(() => suggestRepaymentSplit(loan, 0, date), [loan, date]);
+  // When editing, figures are worked out without this receipt.
+  const base = useMemo(() => (edit ? { ...loan, repayments: loan.repayments.filter((r) => r.id !== edit.id) } : loan), [loan, edit]);
+  const summary = useMemo(() => computeLoan(base), [base]);
+  const due = useMemo(() => suggestRepaymentSplit(base, 0, date), [base, date]);
   const value = round2(parseFloat(amount) || 0);
   const hasRate = loan.interestRate > 0;
   const periodLabel = summary.interestPeriodMonths === 1 ? '1 month' : `${summary.interestPeriodMonths} months`;
@@ -68,16 +79,17 @@ export function ReceiveInterestPanel({ loan, onDone, onCancel }: { loan: Loan; o
     if (date < loan.startDate) return setError(`Date cannot be before the lending date (${formatDate(loan.startDate)})`);
     const note = notes.trim();
     let ok = false;
+    const write = (input: RepaymentInput) => (edit ? updateRepayment(loan.id, edit.id, input) : addRepayment(loan.id, input));
     if (mode === 'unknown') {
       ok = await run(
-        () => addRepayment(loan.id, { amount: 0, date, paymentMethod: method, principalPortion: 0, interestPortion: 0, notes: note || 'Interest received (amount not recorded)', settlesInterest: true }),
-        `Interest marked as received on ${formatDate(date)}. Fresh interest counted from this date.`,
+        () => write({ amount: 0, date, paymentMethod: method, principalPortion: 0, interestPortion: 0, notes: note || 'Interest received (amount not recorded)', settlesInterest: true }),
+        `${edit ? 'Updated: interest' : 'Interest'} marked as received on ${formatDate(date)}. Fresh interest counted from this date.`,
       );
     } else if (mode === 'interest') {
       if (!(value > 0)) return setError('Enter the interest amount received');
       ok = await run(
-        () => addRepayment(loan.id, { amount: value, date, paymentMethod: method, principalPortion: 0, interestPortion: value, notes: note || 'Interest received', settlesInterest: full }),
-        `Interest of ${formatINR(value)} received on ${formatDate(date)}.${full ? ' Fresh interest counted from this date.' : ''}`,
+        () => write({ amount: value, date, paymentMethod: method, principalPortion: 0, interestPortion: value, notes: note || 'Interest received', settlesInterest: full }),
+        `${edit ? 'Updated: interest' : 'Interest'} of ${formatINR(value)} received on ${formatDate(date)}.${full ? ' Fresh interest counted from this date.' : ''}`,
       );
     } else {
       if (!(value > 0)) return setError('Enter the total amount received');
@@ -97,14 +109,25 @@ export function ReceiveInterestPanel({ loan, onDone, onCancel }: { loan: Loan; o
     }
   };
 
-  const saveLabel = mode === 'full' ? 'Save & close record' : mode === 'unknown' ? 'Mark interest received' : 'Save interest';
+  const remove = async () => {
+    if (!edit) return;
+    const yes = await confirm({
+      title: 'Remove this interest entry?',
+      message: `${isUnknownInterest(edit) ? 'Interest (amount not recorded)' : formatINR(edit.amount)} received on ${formatDate(edit.date)} will be removed and interest recalculated.`,
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (yes && (await run(() => deleteRepayment(loan.id, edit.id), 'Interest entry removed'))) onDone?.();
+  };
+
+  const saveLabel = edit ? 'Save changes' : mode === 'full' ? 'Save & close record' : mode === 'unknown' ? 'Mark interest received' : 'Save interest';
 
   return (
     <div className="space-y-5">
       <div className="space-y-2">
         <ModeOption on={mode === 'interest'} onClick={() => pickMode('interest')} icon={<Percent size={16} />} title="Interest amount received" text="Enter how much interest they paid. The amount lent stays the same." />
         <ModeOption on={mode === 'unknown'} onClick={() => pickMode('unknown')} icon={<HelpCircle size={16} />} title="Interest received, amount not known" text="Just mark interest as received. Fresh interest is counted from the date." />
-        <ModeOption on={mode === 'full'} onClick={() => pickMode('full')} icon={<HandCoins size={16} />} title="Full loan amount received" text="They returned the amount lent with interest. The record is closed as Fully Repaid." />
+        {!edit && <ModeOption on={mode === 'full'} onClick={() => pickMode('full')} icon={<HandCoins size={16} />} title="Full loan amount received" text="They returned the amount lent with interest. The record is closed as Fully Repaid." />}
       </div>
 
       <div className="rounded-2xl bg-sky-50 px-4 py-1 dark:bg-sky-500/10">
@@ -203,6 +226,11 @@ export function ReceiveInterestPanel({ loan, onDone, onCancel }: { loan: Loan; o
       </p>
       {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
       <div className="flex gap-2">
+        {edit && (
+          <button type="button" className="btn-secondary text-rose-600 dark:text-rose-400" onClick={remove} disabled={saving} aria-label="Remove interest entry">
+            <Trash2 size={16} />
+          </button>
+        )}
         {onCancel && (
           <button type="button" className="btn-secondary flex-1" onClick={onCancel}>
             Cancel
