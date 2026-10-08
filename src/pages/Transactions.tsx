@@ -309,7 +309,7 @@ export default function Transactions() {
               )}
               <div className="divide-y divide-slate-50 px-2 py-1 dark:divide-white/[0.03]">
                 {g.items.map((t) => (
-                  <TransactionRow key={t.id} t={t} />
+                  <TransactionRow key={t.id} t={t} deletable />
                 ))}
               </div>
             </div>

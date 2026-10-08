@@ -1,5 +1,5 @@
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, ChevronLeft, ChevronRight, Download, ReceiptText } from 'lucide-react';
-import { useMemo } from 'react';
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, CheckSquare, ChevronLeft, ChevronRight, Download, ReceiptText, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { CategoryBars } from '../components/charts/Charts';
 import { TransactionRow } from '../components/Rows';
@@ -11,6 +11,8 @@ import { formatINR } from '../lib/format';
 import { categoryBreakdown, live, txTotals } from '../lib/reports';
 import { useStore } from '../store/useStore';
 import { useUI } from '../store/useUI';
+import { useSave } from '../lib/useSave';
+import type { Transaction } from '../types';
 
 /** One month's "book": totals, where the money went, and every entry grouped by day. */
 export default function MonthBook() {
@@ -21,6 +23,12 @@ export default function MonthBook() {
   const isIn = kind === 'income';
   const all = useStore((s) => s.transactions);
   const open = useUI((s) => s.open);
+  const confirm = useUI((s) => s.confirm);
+  const restoreTransactions = useStore((s) => s.restoreTransactions);
+  const trashMany = useStore((s) => s.trashMany);
+  const { saving, run } = useSave();
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const start = `${ym}-01`;
   const end = endOfMonth(start);
   const today = todayISO();
@@ -34,6 +42,41 @@ export default function MonthBook() {
     }
     return { txs, shown, totals: txTotals(txs, start, end), cats: categoryBreakdown(txs, kind, start, end), days: [...days.entries()] };
   }, [all, start, end, kind]);
+
+  useEffect(() => {
+    setSelecting(false);
+    setSelected(new Set());
+  }, [ym, kind]);
+
+  const bookName = `${isIn ? 'Cash In' : 'Cash Out'} · ${formatMonth(ym)}`;
+  const toggle = (t: Transaction) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(t.id)) next.delete(t.id);
+      else next.add(t.id);
+      return next;
+    });
+  const allSelected = data.shown.length > 0 && data.shown.every((t) => selected.has(t.id));
+
+  const deleteSelected = async () => {
+    const ids = data.shown.filter((t) => selected.has(t.id)).map((t) => t.id);
+    if (!ids.length) return;
+    const total = round2(data.shown.filter((t) => selected.has(t.id)).reduce((a, t) => a + t.amount, 0));
+    const ok = await confirm({
+      title: `Delete ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}?`,
+      message: `${formatINR(total)} from ${bookName} will be moved to Trash. You can restore them from Settings → Trash.`,
+      confirmLabel: `Delete ${ids.length}`,
+      danger: true,
+    });
+    if (!ok) return;
+    const done = await run(() => trashMany(ids, [], `Deleted ${ids.length} entries from ${bookName}`), `${ids.length} ${ids.length === 1 ? 'entry' : 'entries'} moved to Trash`, {
+      undo: () => void restoreTransactions(ids, `Restored ${ids.length} entries to ${bookName}`),
+    });
+    if (done) {
+      setSelecting(false);
+      setSelected(new Set());
+    }
+  };
 
   const go = (delta: number) => navigate(`/transactions/month/${addMonths(start, delta).slice(0, 7)}${isIn ? '?book=in' : ''}`);
   const defaultDate = ym === today.slice(0, 7) ? today : end < today ? end : start;
@@ -77,6 +120,43 @@ export default function MonthBook() {
         </button>
       </div>
 
+      {data.shown.length > 0 && (
+        <div className="card flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+          {selecting ? (
+            <>
+              <span className="text-sm font-semibold">{selected.size} selected</span>
+              <div className="flex flex-wrap gap-2">
+                <button className="btn-secondary py-2" onClick={() => setSelected(allSelected ? new Set() : new Set(data.shown.map((t) => t.id)))}>
+                  <CheckSquare size={15} /> {allSelected ? 'Clear all' : `Select all ${data.shown.length}`}
+                </button>
+                <button className="btn bg-rose-600 py-2 text-white hover:bg-rose-700 disabled:opacity-50" disabled={!selected.size || saving} onClick={deleteSelected}>
+                  <Trash2 size={15} /> Delete{selected.size ? ` ${selected.size}` : ''}
+                </button>
+                <button
+                  className="btn-ghost py-2"
+                  onClick={() => {
+                    setSelecting(false);
+                    setSelected(new Set());
+                  }}
+                  aria-label="Cancel selection"
+                >
+                  <X size={15} /> Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                {data.shown.length} {isIn ? 'cash in' : 'cash out'} {data.shown.length === 1 ? 'entry' : 'entries'} · tap one to edit
+              </span>
+              <button className="btn-secondary py-2 text-rose-600 dark:text-rose-400" onClick={() => setSelecting(true)}>
+                <Trash2 size={15} /> Select to delete
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {data.shown.length === 0 ? (
         <div className="card">
           <EmptyState icon={ReceiptText} title={`No ${isIn ? 'cash in' : 'expenses'} in ${formatMonth(ym)}`} message={`Add ${isIn ? 'money received' : 'money spent'} for this month.`} />
@@ -98,7 +178,7 @@ export default function MonthBook() {
                   </div>
                   <div className="divide-y divide-slate-50 px-2 py-1 dark:divide-white/[0.03]">
                     {items.map((t) => (
-                      <TransactionRow key={t.id} t={t} showDate={false} />
+                      <TransactionRow key={t.id} t={t} showDate={false} deletable selecting={selecting} selected={selected.has(t.id)} onToggle={toggle} />
                     ))}
                   </div>
                 </div>

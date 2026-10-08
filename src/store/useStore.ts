@@ -68,6 +68,8 @@ interface State extends DataSnapshot {
   moveAllToTrash: () => Result;
   /** Moves a set of records (e.g. one import batch) to Trash. */
   trashMany: (txIds: string[], loanIds: string[], label: string) => Result;
+  /** Brings several entries back from Trash in one save (used by Undo after deleting many). */
+  restoreTransactions: (ids: string[], label: string) => Result;
 
   addNote: (name: string, description: string) => Promise<{ id: string; result: CommitResult }>;
   updateNote: (id: string, patch: { name: string; description: string }) => Result;
@@ -549,6 +551,17 @@ export const useStore = create<State>()((_set, get) => {
       ]);
     },
 
+    restoreTransactions: async (ids, label) => {
+      const set = new Set(ids);
+      const docs = get().transactions.filter((x) => set.has(x.id) && x.deletedAt);
+      return commit([
+        ...docs.map((x): Op => {
+          const { deletedAt: _d, ...t } = x;
+          return { kind: 'tx', op: 'put', doc: t };
+        }),
+        activity({ action: 'restored', entity: 'transaction', label }),
+      ]);
+    },
     trashMany: async (txIds, loanIds, label) => {
       const s = get();
       const at = nowISO();

@@ -186,7 +186,7 @@ export default function Search() {
               <SectionTitle title={`Transactions (${txs.length})`} />
               <div className="card divide-y divide-slate-50 px-2 py-1 dark:divide-white/[0.03]">
                 {txs.slice(0, 200).map((t) => (
-                  <TransactionRow key={t.id} t={t} />
+                  <TransactionRow key={t.id} t={t} deletable />
                 ))}
               </div>
             </section>
