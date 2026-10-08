@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Copy, FileSpreadsheet, FileUp, HandCoins, Loader2, NotebookPen, ReceiptText, TrendingUp, Upload } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader, Segmented } from '../components/ui/common';
 import { CATEGORIES, PAYMENT_METHODS } from '../lib/categories';
 import { formatINR } from '../lib/format';
@@ -121,6 +121,35 @@ export default function ImportData() {
     setDefaultType(typeFromSheetName(t.name) ?? 'expense');
     resetDerived();
   };
+
+  // A shared link can carry a small CSV in the URL (#/import?name=…&data=<base64url>[&replace=1]).
+  // It only fills the preview below: nothing is saved until Import is tapped. The part after # never
+  // leaves the phone (it isn't sent to any server).
+  const [params, setParams] = useSearchParams();
+  const pendingReplace = useRef(false);
+  const [fromLink, setFromLink] = useState(false);
+  useEffect(() => {
+    const data = params.get('data');
+    if (!data) return;
+    const name = params.get('name') || 'shared.csv';
+    pendingReplace.current = params.get('replace') === '1';
+    setParams({}, { replace: true });
+    try {
+      const b64 = data.replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = Uint8Array.from(atob(b64 + '==='.slice((b64.length + 3) % 4)), (c) => c.charCodeAt(0));
+      setFromLink(true);
+      void onFile(new File([bytes], name.endsWith('.csv') ? name : `${name}.csv`, { type: 'text/csv' }));
+    } catch {
+      setError('This import link is damaged. Please choose the file instead.');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (pendingReplace.current && step === 'map' && tables.length) {
+      pendingReplace.current = false;
+      setReplaceMonths(true);
+    }
+  }, [step, tables]);
 
   const onFile = async (file: File) => {
     setError('');
@@ -353,6 +382,12 @@ export default function ImportData() {
 
       {step === 'map' && table && (
         <>
+          {fromLink && (
+            <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-4 text-sm dark:border-emerald-500/40 dark:bg-emerald-500/10">
+              <div className="font-semibold">Entries loaded from your link: nothing is saved yet.</div>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Check the list below, then tap the <b>Import</b> button at the bottom to add them to your monthly books.</p>
+            </div>
+          )}
           <div className="card card-pad space-y-4">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <FileSpreadsheet size={16} className="text-brand-500" />
