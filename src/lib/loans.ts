@@ -128,6 +128,11 @@ export function installmentDates(loan: Loan): string[] {
   return dates;
 }
 
+/** Whether a receipt clears all interest up to its date (see Repayment.settlesInterest). */
+export function settlesInterest(r: Repayment): boolean {
+  return r.settlesInterest ?? (r.principalPortion <= 0 && r.interestPortion > 0);
+}
+
 /**
  * Compute the full loan picture as of `asOf` (default: today).
  *
@@ -171,6 +176,9 @@ export function computeLoan(loan: Loan, asOf: string = todayISO()): LoanSummary 
     accrue(r.date);
     principalPaid += r.principalPortion;
     interestPaid += r.interestPortion;
+    // "Full interest till this date received": nothing more (or less) is owed up to this date,
+    // so interest starts fresh from here on the remaining principal.
+    if (loan.interestType !== 'fixed' && settlesInterest(r)) accrued = interestPaid;
     const pOut = outstandingPrincipal(loan.principal, principalPaid);
     const iOut = outstandingInterest(accrued, interestPaid);
     timeline.push({

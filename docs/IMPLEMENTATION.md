@@ -607,3 +607,4 @@ VITE_FIREBASE_EMULATOR=true npm run dev
 | 08 Oct 2026 | Import: CashBook exports of money lent go to **Interest records** (Remark → name, Cash Out → amount); default interest % and due months; **Undo import** in Settings |
 | 08 Oct 2026 | Dashboard: top card shows **this month's** Cash In and Cash Out separately; new **All Cash In & Cash Out** section with month-by-month totals |
 | 02 Oct 2026 | Notes & Investments made fully flexible: unlimited records, any name/type, optional amount, entries grouped by month |
+| 08 Oct 2026 | Interest received: **Full interest till this date** (default) clears all interest up to the receipt date and starts fresh interest from it; **Part of the interest** keeps the rest due. Interest can be recorded from the Edit screen, and for records with no rate set |

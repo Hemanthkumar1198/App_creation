@@ -41,6 +41,11 @@ export interface Repayment {
   interestPortion: number;
   notes: string;
   createdAt: string;
+  /**
+   * Interest received settles all interest up to this date: interest starts fresh from it.
+   * When unset, an interest-only receipt settles; a payment that includes principal does not.
+   */
+  settlesInterest?: boolean;
 }
 
 export interface Loan {

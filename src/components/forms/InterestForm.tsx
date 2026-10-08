@@ -24,6 +24,7 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>(lastMethod);
   const [notes, setNotes] = useState('');
+  const [full, setFull] = useState(true);
   const [error, setError] = useState('');
 
   const summary = useMemo(() => (loan ? computeLoan(loan) : null), [loan]);
@@ -37,7 +38,7 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
     if (!(value > 0)) return setError('Enter the interest amount received');
     if (date < loan.startDate) return setError(`Date cannot be before the loan start (${formatDate(loan.startDate)})`);
     const ok = await run(
-      () => addRepayment(loan.id, { amount: value, date, paymentMethod: method, principalPortion: 0, interestPortion: value, notes: notes.trim() || 'Interest received' }),
+      () => addRepayment(loan.id, { amount: value, date, paymentMethod: method, principalPortion: 0, interestPortion: value, notes: notes.trim() || 'Interest received', settlesInterest: full }),
       `Interest of ${formatINR(value)} received from ${loan.borrowerName}`,
     );
     if (ok) onClose();
@@ -107,6 +108,8 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
           </div>
         </div>
 
+        <FullInterestToggle full={full} onChange={setFull} date={date} />
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date received">
             <input type="date" className="input" value={date} min={loan.startDate} onChange={(e) => setDate(e.target.value || todayISO())} />
@@ -123,10 +126,32 @@ export function InterestForm({ loanId, onClose }: { loanId: string; onClose: () 
           <input className="input" placeholder="e.g. Interest for October" value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          The next interest is counted from {formatDate(date)}. It is kept in Interest Calculation, not in daily Cash In.
+          {full ? `Fresh interest is counted from ${formatDate(date)}.` : 'Interest not covered by this payment stays due.'} It is kept in Interest Calculation, not in daily Cash In.
         </p>
         {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
       </div>
     </Sheet>
+  );
+}
+
+/** "Full interest till this date received" vs. a part payment of interest. */
+export function FullInterestToggle({ full, onChange, date }: { full: boolean; onChange: (v: boolean) => void; date: string }) {
+  return (
+    <div className="space-y-2">
+      <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 p-3 dark:border-white/10">
+        <input type="radio" className="mt-1 h-4 w-4 accent-sky-600" checked={full} onChange={() => onChange(true)} />
+        <span className="text-sm">
+          <span className="font-semibold">Full interest received till {formatDate(date)}</span>
+          <span className="block text-xs text-slate-500 dark:text-slate-400">Clears all interest up to this date. Fresh interest starts from this date.</span>
+        </span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-200 p-3 dark:border-white/10">
+        <input type="radio" className="mt-1 h-4 w-4 accent-sky-600" checked={!full} onChange={() => onChange(false)} />
+        <span className="text-sm">
+          <span className="font-semibold">Part of the interest only</span>
+          <span className="block text-xs text-slate-500 dark:text-slate-400">The rest of the interest up to this date stays due.</span>
+        </span>
+      </label>
+    </div>
   );
 }

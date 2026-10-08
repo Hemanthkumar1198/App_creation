@@ -204,6 +204,19 @@ describe('loan engine', () => {
     expect(computeLoan(loan(), '2026-10-15').nextInterestDueDate).toBe('2026-11-01');
   });
 
+  it('full interest received clears everything due till that date; fresh interest starts from it', () => {
+    // ₹20,000 @ 3%/month = ₹600/month, lent 09 Jun 2024; ₹16,000 received on 21 Dec 2025 as full interest.
+    const l = loan({ principal: 20000, interestRate: 3, startDate: '2024-06-09', dueDate: '2027-06-09', repayments: [rep('2025-12-21', 16000, 0, 16000, 'a')] });
+    expect(computeLoan(l, '2025-12-21').remainingInterest).toBe(0);
+    const s = computeLoan(l, '2026-01-21');
+    expect(s.remainingInterest).toBe(600); // exactly one fresh month, no carry-over either way
+    expect(s.remainingPrincipal).toBe(20000);
+    // A part payment keeps the rest of the interest due.
+    const part = loan({ ...l, repayments: [{ ...rep('2025-12-21', 5000, 0, 5000, 'a'), settlesInterest: false }] });
+    const p = computeLoan(part, '2025-12-21');
+    expect(p.remainingInterest).toBeGreaterThan(5000);
+  });
+
   it('tracks interest received on a record with no rate set (e.g. imported)', () => {
     const l = loan({ interestRate: 0, repayments: [rep('2026-11-10', 1500, 0, 1500, 'a')] });
     const s = computeLoan(l, '2026-11-20');

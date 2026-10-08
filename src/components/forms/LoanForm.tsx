@@ -3,6 +3,7 @@ import { Calculator, Loader2, Percent, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sheet } from '../ui/Sheet';
+import { FullInterestToggle } from './InterestForm';
 import { Field, Row, Segmented } from '../ui/common';
 import { addMonths, formatDate, monthsBetween, todayISO } from '../../lib/dates';
 import { round2 } from '../../lib/finance';
@@ -324,6 +325,7 @@ function InterestReceivedBox({ loan }: { loan: Loan }) {
   const { saving, run } = useSave();
   const [date, setDate] = useState(todayISO());
   const [amount, setAmount] = useState('');
+  const [full, setFull] = useState(true);
   const [error, setError] = useState('');
   const s = useMemo(() => computeLoan(loan), [loan]);
   const value = round2(parseFloat(amount) || 0);
@@ -332,8 +334,8 @@ function InterestReceivedBox({ loan }: { loan: Loan }) {
     if (!(value > 0)) return setError('Enter the interest amount received');
     if (date < loan.startDate) return setError(`Date cannot be before the lending date (${formatDate(loan.startDate)})`);
     const ok = await run(
-      () => addRepayment(loan.id, { amount: value, date, paymentMethod: lastMethod, principalPortion: 0, interestPortion: value, notes: 'Interest received' }),
-      `Interest of ${formatINR(value)} received on ${formatDate(date)}. Next interest counted from this date.`,
+      () => addRepayment(loan.id, { amount: value, date, paymentMethod: lastMethod, principalPortion: 0, interestPortion: value, notes: 'Interest received', settlesInterest: full }),
+      `Interest of ${formatINR(value)} received on ${formatDate(date)}.${full ? ' Fresh interest counted from this date.' : ''}`,
     );
     if (ok) {
       setAmount('');
@@ -382,12 +384,14 @@ function InterestReceivedBox({ loan }: { loan: Loan }) {
           />
         </Field>
       </div>
+      <div className="mt-3">
+        <FullInterestToggle full={full} onChange={setFull} date={date} />
+      </div>
       {error && <p className="mt-2 text-sm font-medium text-rose-600">{error}</p>}
       <button type="button" className="btn mt-3 w-full bg-sky-600 text-white hover:bg-sky-700" onClick={save} disabled={saving}>
         {saving && <Loader2 size={16} className="animate-spin" />}
         {saving ? 'Saving…' : 'Save interest received'}
       </button>
-      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Interest is counted again from the date received.</p>
       {s.interestPayments.length > 0 && (
         <div className="mt-3">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Interest received so far · {formatINR(s.interestRepaid)}</div>

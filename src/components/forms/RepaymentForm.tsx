@@ -7,7 +7,8 @@ import { PAYMENT_METHODS } from '../../lib/categories';
 import { formatDate, todayISO } from '../../lib/dates';
 import { round2 } from '../../lib/finance';
 import { formatINR } from '../../lib/format';
-import { suggestRepaymentSplit } from '../../lib/loans';
+import { settlesInterest, suggestRepaymentSplit } from '../../lib/loans';
+import { FullInterestToggle } from './InterestForm';
 import { useStore } from '../../store/useStore';
 import { useUI } from '../../store/useUI';
 import { useSave } from '../../lib/useSave';
@@ -30,6 +31,7 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
   const [principalPortion, setPrincipal] = useState(existing ? String(existing.principalPortion) : '');
   const [interestPortion, setInterest] = useState(existing ? String(existing.interestPortion) : '');
   const [notes, setNotes] = useState(existing?.notes ?? '');
+  const [full, setFull] = useState(existing ? settlesInterest(existing) : false);
   const [error, setError] = useState('');
 
   const value = round2(parseFloat(amount) || 0);
@@ -46,7 +48,7 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
     if (pPortion < 0 || iPortion < 0) return setError('Portions cannot be negative');
     if (pPortion > due.principalDue + 0.009) return setError(`Principal portion cannot exceed ${formatINR(due.principalDue, { paise: true })}`);
     if (Math.abs(round2(pPortion + iPortion) - value) > 0.009) return setError(`Principal + interest must equal ${formatINR(value, { paise: true })}`);
-    const payload = { amount: value, date, paymentMethod: method, principalPortion: pPortion, interestPortion: iPortion, notes: notes.trim() };
+    const payload = { amount: value, date, paymentMethod: method, principalPortion: pPortion, interestPortion: iPortion, notes: notes.trim(), settlesInterest: iPortion > 0 && full };
     const ok = existing
       ? await run(() => updateRepayment(loan.id, existing.id, payload), 'Repayment updated')
       : await run(() => addRepayment(loan.id, payload), `Repayment of ${formatINR(value)} recorded`);
@@ -187,6 +189,8 @@ export function RepaymentForm({ loanId, editId, onClose }: { loanId: string; edi
             </Field>
           </div>
         </div>
+
+        {iPortion > 0 && <FullInterestToggle full={full} onChange={setFull} date={date} />}
 
         <Field label="Notes">
           <input className="input" placeholder="e.g. Paid via GPay" value={notes} onChange={(e) => setNotes(e.target.value)} />
