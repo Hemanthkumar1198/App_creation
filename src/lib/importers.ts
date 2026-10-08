@@ -383,7 +383,7 @@ const CATEGORY_RULES: [RegExp, string][] = [
   [/business|sales|shop income/i, 'Business'],
   [/refund|cashback|reversal/i, 'Refund'],
   [/petrol|diesel|fuel|hpcl|bpcl|indian oil|iocl|shell/i, 'Petrol/Fuel'],
-  [/rent\b|house rent|landlord/i, 'Rent'],
+  [/\brent\b|house rent|landlord/i, 'Rent'],
   [/swiggy|zomato|food|grocer|restaurant|cafe|bigbasket|blinkit|zepto|dmart|milk|vegetable|dinner|lunch|breakfast/i, 'Food'],
   [/amazon|flipkart|myntra|ajio|meesho|shopping|cloth|mall|nykaa/i, 'Shopping'],
   [/uber|ola|rapido|irctc|train|flight|bus|metro|travel|makemytrip|redbus|cab|taxi|toll|fastag/i, 'Travel'],
@@ -396,11 +396,27 @@ const CATEGORY_RULES: [RegExp, string][] = [
   [/personal|salon|grooming|gym/i, 'Personal'],
 ];
 
+/** Category names other apps export, mapped to ours. */
+const CATEGORY_ALIASES: [RegExp, string][] = [
+  [/^food\s*(&|and)\s*dining$|^dining$|^groceries$/i, 'Food'],
+  [/^transport(ation)?$|^commute$/i, 'Travel'],
+  [/^health(\s*(&|and)\s*(medical|fitness))?$|^medical$/i, 'Medical'],
+  [/^utilities$|^bills?(\s*(&|and)\s*utilities)?$/i, 'Bills'],
+  [/^misc(ellaneous)?$|^others?$|^general$/i, 'Other'],
+];
+
 export function guessCategory(categoryCell: string, description: string, known: string[]): string {
   const c = categoryCell.trim();
   const exact = known.find((k) => k.toLowerCase() === c.toLowerCase());
   if (exact) return exact;
-  for (const [re, cat] of CATEGORY_RULES) if (re.test(c) || re.test(description)) return cat;
+  // The file's own category wins (e.g. "Utilities" → Bills, "Food & Dining" → Food); the
+  // description is only used when the file has no category we recognise.
+  if (c) {
+    const alias = CATEGORY_ALIASES.find(([re]) => re.test(c));
+    if (alias) return alias[1];
+    for (const [re, cat] of CATEGORY_RULES) if (re.test(c)) return cat;
+  }
+  for (const [re, cat] of CATEGORY_RULES) if (re.test(description)) return cat;
   return 'Other';
 }
 
@@ -456,11 +472,14 @@ export function buildTxDrafts(rows: string[][], map: Partial<Record<TxField, num
     const issues: string[] = [];
     const dateRaw = get(r, 'date');
     const description = get(r, 'description');
-    // Skip summary/total lines and repeated headers commonly found in statements.
-    if (/^(total|opening balance|closing balance|grand total|balance b\/f|balance c\/f)/i.test(description || dateRaw)) return;
+    const date = parseDateLoose(dateRaw, opts.dateOrder);
+    // Skip statement summary lines ("Total", "Closing balance"…) and repeated headers. A dated row
+    // is only skipped when it is just the label: "Total till May 31" with a date is a real entry.
+    const summary = /^(total|opening balance|closing balance|grand total|balance b\/f|balance c\/f)/i;
+    const label = description || dateRaw;
+    if (summary.test(label) && (!date || /^(total|opening balance|closing balance|grand total|balance b\/f|balance c\/f)\s*:?\s*$/i.test(label))) return;
     if (headerScore(r) >= 2) return;
 
-    const date = parseDateLoose(dateRaw, opts.dateOrder);
     let type: TxType | null = parseTypeCell(get(r, 'type'));
     let amount: number | null = null;
 

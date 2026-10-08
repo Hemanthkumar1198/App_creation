@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { PageHeader, Segmented } from '../components/ui/common';
 import { CATEGORIES, PAYMENT_METHODS } from '../lib/categories';
 import { formatINR } from '../lib/format';
+import { round2 } from '../lib/finance';
 import {
   autoMap,
   buildLoanDrafts,
@@ -87,6 +88,8 @@ export default function ImportData() {
   const [destName, setDestName] = useState('');
   const [nameTouched, setNameTouched] = useState(false);
   const [planKind, setPlanKind] = useState('Other');
+  // "Fresh update": move what's already in the file's months (same Cash In / Cash Out book) to Trash first.
+  const [replaceMonths, setReplaceMonths] = useState(false);
   const notesAll = useStore((s) => s.notes);
   const plansAll = useStore((s) => s.plans);
   const importNoteEntries = useStore((s) => s.importNoteEntries);
@@ -104,6 +107,7 @@ export default function ImportData() {
   };
 
   const configure = (ts: RawTable[], idx: number, name = fileName) => {
+    setReplaceMonths(false);
     const t = ts[idx];
     const h = detectHeaderRow(t.rows);
     const tgt = guessTarget(t, h, name);
@@ -149,21 +153,34 @@ export default function ImportData() {
   };
 
   const isEntries = target !== 'loans';
+  const baseTxDrafts = useMemo(() => {
+    if (!isEntries || !table) return [];
+    const base = buildTxDrafts(dataRows, txMap, { dateOrder, defaultType, knownCategories: CATEGORIES.map((c) => c.name) });
+    return base.map((d) => (txEdits[d.row] ? validateTxDraft({ ...d, ...txEdits[d.row] }) : d));
+  }, [isEntries, table, dataRows, txMap, dateOrder, defaultType, txEdits]);
+
+  // Existing entries in the same months and book (Cash Out / Cash In) as the file.
+  const replaceable = useMemo(() => {
+    if (target !== 'transactions') return [];
+    const keys = new Set(baseTxDrafts.filter((d) => d.status !== 'error').map((d) => `${d.date.slice(0, 7)}|${d.type}`));
+    return txsAll.filter((t) => !t.deletedAt && keys.has(`${t.date.slice(0, 7)}|${t.type}`));
+  }, [target, baseTxDrafts, txsAll]);
+  const replacing = replaceMonths && replaceable.length > 0;
+
   const existingForDup = useMemo(() => {
-    if (target === 'transactions') return txsAll;
+    if (target === 'transactions') {
+      if (!replacing) return txsAll;
+      const gone = new Set(replaceable.map((t) => t.id));
+      return txsAll.filter((t) => !gone.has(t.id));
+    }
     const asTx = (date: string, type: 'income' | 'expense', amount: number, description: string) =>
       ({ id: '', type, amount, date, description, category: '', paymentMethod: 'Other', notes: '', createdAt: '', updatedAt: '' }) as (typeof txsAll)[number];
     if (target === 'note' && destId) return (notesAll.find((n) => n.id === destId)?.entries ?? []).map((e) => asTx(e.date, e.type === 'in' ? 'income' : 'expense', e.amount, e.description));
     if (target === 'plan' && destId) return (plansAll.find((p) => p.id === destId)?.payments ?? []).map((e) => asTx(e.date, 'expense', e.amount, e.description ?? ''));
     return [];
-  }, [target, destId, txsAll, notesAll, plansAll]);
+  }, [target, destId, txsAll, notesAll, plansAll, replacing, replaceable]);
 
-  const txDrafts = useMemo(() => {
-    if (!isEntries || !table) return [];
-    const base = buildTxDrafts(dataRows, txMap, { dateOrder, defaultType, knownCategories: CATEGORIES.map((c) => c.name) });
-    const edited = base.map((d) => (txEdits[d.row] ? validateTxDraft({ ...d, ...txEdits[d.row] }) : d));
-    return markTxDuplicates(edited, existingForDup);
-  }, [isEntries, table, dataRows, txMap, dateOrder, defaultType, txEdits, existingForDup]);
+  const txDrafts = useMemo(() => markTxDuplicates(baseTxDrafts, existingForDup), [baseTxDrafts, existingForDup]);
 
   // Suggest a name from the entries' dates (e.g. "Apr 2026 expenses") until the user edits it.
   const suggestedName = useMemo(() => {
@@ -212,7 +229,8 @@ export default function ImportData() {
           linkLabel: months.length === 1 ? `Open ${suggestNameFromDates([top + '-01'], top)} book` : 'View monthly books',
           where: `Saved by their dates into your monthly books: ${suggestNameFromDates(txs.map((t) => t.date), '')}.`,
         };
-        return importRecords(txs, [], label);
+        if (replacing) done.where += ` ${replaceable.length} earlier ${replaceable.length === 1 ? 'entry' : 'entries'} in those months moved to Trash.`;
+        return importRecords(txs, [], label, replacing ? replaceable.map((t) => t.id) : []);
       }
       if (target === 'loans') {
         done = { link: '/loans', linkLabel: 'View interest records', where: '' };
@@ -423,6 +441,18 @@ export default function ImportData() {
                   <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                     Entries go into your monthly books by their own dates: <b>{suggestNameFromDates(txDrafts.map((d) => d.date), '—')}</b>. The Dashboard shows only the current month.
                   </p>
+                )}
+                {target === 'transactions' && replaceable.length > 0 && (
+                  <label className={clsx('mt-3 flex cursor-pointer items-start gap-3 rounded-2xl border-2 p-3 text-sm', replaceMonths ? 'border-rose-400 bg-rose-50 dark:bg-rose-500/10' : 'border-slate-200 dark:border-white/10')}>
+                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-rose-600" checked={replaceMonths} onChange={(e) => setReplaceMonths(e.target.checked)} />
+                    <span>
+                      <span className="font-semibold">Replace what's already in {suggestNameFromDates(replaceable.map((t) => t.date), 'these months')} (fresh update)</span>
+                      <span className="block text-xs text-slate-500 dark:text-slate-400">
+                        {replaceable.length} existing {replaceable.some((t) => t.type === 'income') && replaceable.some((t) => t.type === 'expense') ? 'Cash In / Cash Out' : replaceable[0].type === 'income' ? 'Cash In' : 'Cash Out'}{' '}
+                        {replaceable.length === 1 ? 'entry' : 'entries'} ({formatINR(round2(replaceable.reduce((a, t) => a + t.amount, 0)))}) will be moved to Trash, then this file is saved. Nothing is lost: restore from Settings → Trash.
+                      </span>
+                    </span>
+                  </label>
                 )}
               </div>
               <div>

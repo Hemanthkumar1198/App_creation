@@ -180,4 +180,16 @@ describe('CashBook-app export of money lent (Date, Remark, Cash In, Cash Out…)
     expect(cleanBorrowerName('Ramesh mava given around apr may')).toBe('Ramesh mava');
     expect(cleanBorrowerName('Ramkrishna uncl')).toBe('Ramkrishna uncl');
   });
+
+  it("keeps dated 'Total till …' rows and uses the file's own category", () => {
+    const rows = parseCSV('Date,Category,Amount,Description\n"2026-05-29","Utilities","6100.00","Total till may 31"\n"2026-05-04","Transportation","500.00","Petrol"\n"2026-05-01","Food & Dining","28.00","Milk"\n,,"6628",Total\n"2026-09-21","Utilities","211.00","Curent pill"\n');
+    const map = autoMap(rows[0], TX_FIELDS.map((f) => f.key));
+    const d = buildTxDrafts(rows.slice(1), map, { dateOrder: 'dmy', defaultType: 'expense', knownCategories: ['Food', 'Travel', 'Bills', 'Rent', 'Petrol/Fuel', 'Other'] });
+    expect(d.map((x) => [x.amount, x.category])).toEqual([
+      [6100, 'Bills'],
+      [500, 'Travel'],
+      [28, 'Food'],
+      [211, 'Bills'],
+    ]);
+  });
 });

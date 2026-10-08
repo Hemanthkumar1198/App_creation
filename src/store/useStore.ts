@@ -61,7 +61,8 @@ interface State extends DataSnapshot {
   deleteTopUp: (loanId: string, topUpId: string) => Result;
 
   updateSettings: (s: Partial<Settings>) => Result;
-  importRecords: (txs: Transaction[], loans: Loan[], label: string) => Result;
+  /** `replaceTxIds`: entries moved to Trash in the same save ("fresh update" of a month). */
+  importRecords: (txs: Transaction[], loans: Loan[], label: string, replaceTxIds?: string[]) => Result;
   replaceAll: (data: { transactions: Transaction[]; loans: Loan[]; notes?: CalcNote[]; plans?: Plan[]; settings?: Settings }, label: string) => Result;
   loadSampleData: () => Result;
   /** Moves everything to Trash (recoverable). Nothing is ever erased permanently. */
@@ -404,10 +405,13 @@ export const useStore = create<State>()((_set, get) => {
       }
       return commit([{ kind: 'settings', op: 'put', doc: { ...get().settings, ...patch } }]);
     },
-    importRecords: async (txs, loans, label) => {
+    importRecords: async (txs, loans, label, replaceTxIds = []) => {
       txs.forEach((t) => cleanTx(t));
       loans.forEach(validateLoan);
+      const gone = new Set(replaceTxIds);
+      const at = nowISO();
       return commit([
+        ...get().transactions.filter((t) => gone.has(t.id) && !t.deletedAt).map((t): Op => ({ kind: 'tx', op: 'put', doc: { ...t, deletedAt: at } })),
         ...txs.map((doc): Op => ({ kind: 'tx', op: 'put', doc })),
         ...loans.map((doc): Op => ({ kind: 'loan', op: 'put', doc })),
         activity({ action: 'imported', entity: 'data', label }),
